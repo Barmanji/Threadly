@@ -6,7 +6,17 @@ import { useAuth } from "./AuthContext";
 // Function to establish a socket connection with authorization token
 const getSocket = (token?: string | null) => {
   const authToken = token ?? LocalStorage.get("token");
-  return socketio(import.meta.env.VITE_SOCKET_URI, {
+  // FIX: Modified AI CODE STARTS HERE
+  const socketURI = import.meta.env.VITE_SOCKET_URI;
+  console.log("Initializing socket...", {
+    uri: socketURI,
+    hasToken: !!authToken,
+  });
+  if (!socketURI) {
+    console.error("Socket URI is missing in environment variables!");
+  }
+  return socketio(socketURI, {
+    // FIX: ENDS HERE
     withCredentials: true,
     auth: { token: authToken },
   });
@@ -28,7 +38,7 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
 }) => {
   // State to store the socket instance
   const [socket, setSocket] = useState<ReturnType<typeof socketio> | null>(
-    null
+    null,
   );
   const { token } = useAuth();
 

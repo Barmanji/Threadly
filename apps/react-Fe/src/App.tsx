@@ -9,6 +9,7 @@ import PublicRoute from "./components/PublicRoute";
 const App = () => {
     const { token, user } = useAuth();
 
+
     return (
         <Routes>
             <Route
