@@ -35,8 +35,7 @@ const WebRTCContext = createContext<IWebRTCContext | null>(null);
 
 export const useWebRTC = () => {
   const context = useContext(WebRTCContext);
-  if (!context)
-    throw new Error("useWebRTC must be used within a WebRTCProvider");
+  if (!context) throw new Error("useWebRTC must be used within a WebRTCProvider");
   return context;
 };
 
@@ -56,9 +55,6 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const resetCallState = useCallback(() => {
     if (peerRef.current) {
-      peerRef.current.getSenders().forEach((sender) => {
-        if (sender.track) sender.track.stop();
-      });
       peerRef.current.close();
       peerRef.current = null;
     }
@@ -87,18 +83,16 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    pc.ontrack = (event) => {
-      console.log("Remote track event fired:", event.streams[0]);
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
-      }
-    };
+pc.ontrack = (event) => {
+  console.log("Remote track event received");
+  if (event.streams && event.streams[0]) {
+    // Wrap in a new MediaStream to ensure React detects a state change
+    setRemoteStream(new MediaStream(event.streams[0].getTracks()));
+  }
+};
 
     pc.oniceconnectionstatechange = () => {
-      if (
-        pc.iceConnectionState === "disconnected" ||
-        pc.iceConnectionState === "failed"
-      ) {
+      if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
         resetCallState();
       }
     };
@@ -114,87 +108,68 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       try {
         await peerRef.current.addIceCandidate(new RTCIceCandidate(candidate!));
       } catch (e) {
-        console.error("Error adding queued ICE candidate", e);
+        console.error("Error adding queued ICE", e);
       }
     }
   }, []);
 
-  const startCall = useCallback(
-    async (peerId: string, callType: "video" | "audio") => {
-      const pc = createPeerConnection();
-      remotePeerIdRef.current = peerId;
-      setIsVideoEnabled(callType === "video");
-      console.log("outgooing calltype", callType);
+  const startCall = useCallback(async (peerId: string, callType: "video" | "audio") => {
+    const pc = createPeerConnection();
+    remotePeerIdRef.current = peerId;
+    setIsVideoEnabled(callType === "video");
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: callType === "video",
-          audio: true,
-        });
-        setLocalStream(stream);
-        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: callType === "video",
+        audio: true,
+      });
+      setLocalStream(stream);
+      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-
-        socket?.emit("call-user", { to: peerId, offer, callType });
-        setIsCallActive(true);
-      } catch (err) {
-        console.error("Failed to start call:", err);
-        resetCallState();
-      }
-    },
-    [createPeerConnection, socket, resetCallState],
-  );
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket?.emit("call-user", { to: peerId, offer, callType });
+      setIsCallActive(true);
+    } catch (err) {
+      console.error("Call start error:", err);
+      resetCallState();
+    }
+  }, [createPeerConnection, socket, resetCallState]);
 
   const acceptIncomingCall = useCallback(async () => {
     if (!incomingCall) return;
-
-    // 1. Initialize Peer Connection
     const pc = createPeerConnection();
     remotePeerIdRef.current = incomingCall.from;
-    setIsVideoEnabled(incomingCall.callType === "video");
+    const isVideoCall = incomingCall.callType !== "audio";
+    setIsVideoEnabled(isVideoCall);
 
     try {
-      // 2. Request Camera/Mic immediately to wake up hardware
+      // 1. MUST set remote description FIRST
+      await pc.setRemoteDescription(new RTCSessionDescription(incomingCall.offer));
+
+      // 2. Clear any candidates that arrived during negotiation
+      await processIceQueue();
+
+      // 3. Get hardware
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: incomingCall.callType === "video",
+        video: isVideoCall,
         audio: true,
       });
-      console.log("incoming calltype", incomingCall.callType);
       setLocalStream(stream);
-
-      // 3. Set Remote Description (the offer we received)
-      await pc.setRemoteDescription(
-        new RTCSessionDescription(incomingCall.offer),
-      );
-
-      // 4. Add local tracks to the connection
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-      // 5. Create the Answer
+      // 4. Create Answer
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
-      // 6. Signal back
       socket?.emit("call-accepted", { to: incomingCall.from, answer });
-
-      // 7. Process any ICE candidates that arrived while we were getting camera access
-      await processIceQueue();
-
       setIsCallActive(true);
       setIncomingCall(null);
     } catch (err) {
-      console.error("Critical error in acceptIncomingCall:", err);
+      console.error("Accept call error:", err);
       resetCallState();
     }
-  }, [
-    incomingCall,
-    createPeerConnection,
-    socket,
-    processIceQueue,
-    resetCallState,
-  ]);
+  }, [incomingCall, createPeerConnection, socket, processIceQueue, resetCallState]);
 
   const rejectIncomingCall = useCallback(() => {
     if (incomingCall) {
@@ -204,59 +179,43 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   }, [incomingCall, socket]);
 
   const endCall = useCallback(() => {
-    if (remotePeerIdRef.current) {
-      socket?.emit("call-ended", { to: remotePeerIdRef.current });
-    }
+    if (remotePeerIdRef.current) socket?.emit("call-ended", { to: remotePeerIdRef.current });
     resetCallState();
   }, [socket, resetCallState]);
 
   const toggleMute = useCallback(() => {
     if (localStream) {
-      localStream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
-      setIsMuted((prev) => !prev);
+      localStream.getAudioTracks().forEach(t => t.enabled = !t.enabled);
+      setIsMuted(prev => !prev);
     }
   }, [localStream]);
 
   const toggleVideo = useCallback(() => {
     if (localStream) {
-
-      localStream.getVideoTracks().forEach((t) => ((t.enabled) = !t.enabled));
-      setIsVideoEnabled((prev) => !prev);
+      localStream.getVideoTracks().forEach(t => t.enabled = !t.enabled);
+      setIsVideoEnabled(prev => !prev);
     }
   }, [localStream]);
 
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("incomming-call", (data: IIncomingCall) => {
-      setIncomingCall(data);
-    });
-
+    socket.on("incomming-call", (data: IIncomingCall) => setIncomingCall(data));
     socket.on("call-accepted", async ({ answer }) => {
       if (peerRef.current) {
-        try {
-          await peerRef.current.setRemoteDescription(
-            new RTCSessionDescription(answer),
-          );
-          await processIceQueue();
-        } catch (e) {
-          console.error("Error setting remote description on accepted call", e);
-        }
+        await peerRef.current.setRemoteDescription(new RTCSessionDescription(answer));
+        await processIceQueue();
       }
     });
-
     socket.on("ice-candidate", ({ candidate }) => {
-      if (peerRef.current && peerRef.current.remoteDescription) {
-        peerRef.current
-          .addIceCandidate(new RTCIceCandidate(candidate))
-          .catch((e) => console.error("ICE addition failed", e));
+      if (peerRef.current?.remoteDescription) {
+        peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(console.error);
       } else {
         iceQueue.current.push(candidate);
       }
     });
-
-    socket.on("call-ended", () => resetCallState());
-    socket.on("call-rejected", () => resetCallState());
+    socket.on("call-ended", resetCallState);
+    socket.on("call-rejected", resetCallState);
 
     return () => {
       socket.off("incomming-call");
@@ -268,22 +227,10 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   }, [socket, resetCallState, processIceQueue]);
 
   return (
-    <WebRTCContext.Provider
-      value={{
-        localStream,
-        remoteStream,
-        isCallActive,
-        incomingCall,
-        isMuted,
-        isVideoEnabled,
-        startCall,
-        endCall,
-        acceptIncomingCall,
-        rejectIncomingCall,
-        toggleMute,
-        toggleVideo,
-      }}
-    >
+    <WebRTCContext.Provider value={{
+      localStream, remoteStream, isCallActive, incomingCall, isMuted, isVideoEnabled,
+      startCall, endCall, acceptIncomingCall, rejectIncomingCall, toggleMute, toggleVideo
+    }}>
       {children}
     </WebRTCContext.Provider>
   );
