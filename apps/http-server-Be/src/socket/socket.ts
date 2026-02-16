@@ -70,7 +70,7 @@ const initializeSocketIO = (io: Server) => {
       ) as { _id: string };
 
       const user = await User.findById(decodedToken?._id).select(
-        "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+        "-password -refreshToken",
       );
 
       // retrieve the user

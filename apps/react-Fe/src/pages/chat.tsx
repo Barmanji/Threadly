@@ -181,7 +181,7 @@ const ChatPage = () => {
     // Emit a STOP_TYPING_EVENT to inform other users/participants that typing has stopped
     socket.emit(STOP_TYPING_EVENT, currentChat.current?._id);
 
-    // FIX: debugging
+    // NOTE: debugging
     console.log("Socket status:", { socket: !!socket, isConnected });
     if (!currentChat.current?._id || !socket || !isConnected) {
       console.log("Cannot send message - missing requirements");
