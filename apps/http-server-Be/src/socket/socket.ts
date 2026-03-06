@@ -42,7 +42,10 @@ const mountParticipantStoppedTypingEvent = (socket: Socket): void => {
  * Initialize socket server
  */
 const initializeSocketIO = (io: Server) => {
+  console.log("io: ", io);
   return io.on("connection", async (rawSocket: Socket) => {
+    console.log("io2: ", io, "\n rawSoc: ", rawSocket);
+
     const socket = rawSocket as SocketWithUser;
     try {
       // parse the cookies from the handshake headers (This is only possible if client has `withCredentials: true`)
