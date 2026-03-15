@@ -6,7 +6,7 @@ import { useAuth } from "./AuthContext";
 // Function to establish a socket connection with authorization token
 const getSocket = (token?: string | null) => {
   const authToken = token ?? LocalStorage.get("token");
-  // FIX: Modified AI CODE STARTS HERE
+  // TEST: Modified AI CODE STARTS HERE
   const socketURI = import.meta.env.VITE_SOCKET_URI;
   console.log("Initializing socket...", {
     uri: socketURI,
@@ -16,7 +16,7 @@ const getSocket = (token?: string | null) => {
     console.error("Socket URI is missing in environment variables!");
   }
   return socketio(socketURI, {
-    // FIX: ENDS HERE
+    // TEST: ENDS HERE
     withCredentials: true,
     auth: { token: authToken },
   });

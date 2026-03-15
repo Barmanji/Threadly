@@ -367,6 +367,7 @@ const ChatPage = () => {
     ]);
   };
 
+
   useEffect(() => {
     // Fetch the chat list from the server.
     getChats();
@@ -585,7 +586,7 @@ const ChatPage = () => {
                     </small>
                   </div>
                 </div>
-                {!currentChat.current.isGroupChat && (
+                {
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
@@ -615,8 +616,9 @@ const ChatPage = () => {
                     >
                       <VideoCameraIcon className="w-6 h-6" />
                     </button>
+
                   </div>
-                )}
+                }
               </div>
               <CallModal />
               <IncomingCallModal />
