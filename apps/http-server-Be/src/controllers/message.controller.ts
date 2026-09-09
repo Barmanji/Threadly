@@ -1,4 +1,5 @@
 import mongoose, { ObjectId } from "mongoose";
+import { Readable } from "stream";
 import { ChatEventEnum } from "../constants.js";
 import { Chat } from "../models/chat/chat.model.js";
 import { ChatMessage } from "../models/chat/message.model.js";
@@ -13,6 +14,9 @@ import { uploadResultCloudinary } from "../utils/fileUploaderCloudinary.js";
 interface AttachmentFile {
   url: string;
   localPath: string;
+  mimetype: string;
+  fileName: string;
+  size: number;
 }
 
 type MulterRequest = Request & {
@@ -114,7 +118,22 @@ const sendMessage: RequestHandler = asyncHandler(
       const uploadPromises = files.attachments.map(
         async (attachment: Express.Multer.File) => {
           try {
-            const uploadResult = await uploadResultCloudinary(attachment.path);
+            // Pick an explicit Cloudinary resource type. Office documents must be
+            // stored as "raw" (auto-detection is flaky for zip-based formats
+            // like docx/pptx), while PDFs should stay as image assets so they
+            // get proper delivery/transform support.
+            const resourceType: "auto" | "image" | "video" | "raw" =
+              attachment.mimetype.startsWith("image/")
+                ? "image"
+                : attachment.mimetype.startsWith("video/")
+                ? "video"
+                : attachment.mimetype === "application/pdf"
+                ? "image"
+                : "raw";
+            const uploadResult = await uploadResultCloudinary(
+              attachment.path,
+              resourceType,
+            );
             if (!uploadResult) {
               throw new ApiError(
                 400,
@@ -123,6 +142,10 @@ const sendMessage: RequestHandler = asyncHandler(
             }
             return {
               url: uploadResult.url,
+              localPath: attachment.path,
+              mimetype: attachment.mimetype,
+              fileName: attachment.originalname,
+              size: attachment.size,
             };
           } catch (error) {
             console.error(`Upload failed for ${attachment.path}:`, error);
@@ -216,6 +239,65 @@ const sendMessage: RequestHandler = asyncHandler(
   },
 );
 
+const downloadAttachment: RequestHandler = asyncHandler(async (req, res) => {
+  const url = req.query.url as string | undefined;
+  const filename = (req.query.filename as string | undefined) || "download";
+  if (!url) {
+    throw new ApiError(400, "File URL is required");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new ApiError(400, "Invalid file URL");
+  }
+
+  // Only allow proxying our own object storage to avoid SSRF.
+  if (!parsed.hostname.endsWith("res.cloudinary.com")) {
+    throw new ApiError(400, "Only Cloudinary URLs are allowed");
+  }
+
+  // Fetch with browser-like headers — Cloudinary's CDN returns a short error
+  // page (instead of the real file) for servers/clients that send a bare
+  // user-agent, which is why blob downloads came back as tiny 2KB files.
+  const response = await fetch(url, {
+    headers: {
+      Accept: "*/*",
+      "User-Agent": "Mozilla/5.0 (compatible; ChatApp/1.0)",
+    },
+  });
+  console.log(
+    "[download-attachment] cloudinary",
+    response.status,
+    response.headers.get("content-type"),
+    "len=" + response.headers.get("content-length"),
+    url,
+  );
+  if (!response.ok) {
+    throw new ApiError(502, "Could not fetch the file from storage");
+  }
+
+  const safeName = filename.replace(/[^\w.-]+/g, "_") || "download";
+
+  res.setHeader(
+    "Content-Type",
+    response.headers.get("content-type") || "application/octet-stream",
+  );
+  res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+  const contentLength = response.headers.get("content-length");
+  if (contentLength) {
+    res.setHeader("Content-Length", contentLength);
+  }
+
+  if (response.body) {
+    // Stream the file through instead of buffering the whole thing in memory.
+    Readable.fromWeb(response.body as never).pipe(res);
+  } else {
+    res.end();
+  }
+});
+
 const deleteMessage: RequestHandler = asyncHandler(async (req, res) => {
   const { chatId, messageId } = req.params;
 
@@ -294,4 +376,4 @@ const deleteMessage: RequestHandler = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, message, "Message deleted successfully"));
 });
 
-export { getAllMessages, sendMessage, deleteMessage };
+export { getAllMessages, sendMessage, deleteMessage, downloadAttachment };
