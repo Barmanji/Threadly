@@ -113,15 +113,24 @@ const registerUser: RequestHandler = asyncHandler(
 const loginUser: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
     const { username, email, password } = req.body;
-    if (!username && !email) {
+    // The web UI sends the identifier (a username OR an email) in the `username`
+    // field, so treat whichever is present as the identifier and match it
+    // against both the username and the email of stored users.
+    const identifier = (username || email || "").toString().trim();
+    if (!identifier || !password) {
       throw new ApiError(
         400,
-        "Atleast one of the field is required -> Email or Username",
+        "Username/email and password are required",
       );
     }
-    //User.findOne({email}) --> this is valid as wellfor email only or for username just change it to username
+    const escapedIdentifier = identifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const findUser: any = await User.findOne({
-      $or: [{ email }, { username }], //better syntax
+      $or: [
+        { username: identifier.toLowerCase() },
+        {
+          email: { $regex: new RegExp(`^${escapedIdentifier}$`, "i") },
+        },
+      ],
     });
     if (!findUser) {
       throw new ApiError(
