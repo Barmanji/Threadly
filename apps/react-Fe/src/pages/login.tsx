@@ -27,11 +27,11 @@ const Login = () => {
     return (
         <div className="flex h-screen w-screen flex-col items-center justify-center bg-cream">
             <h1 className="neo rotate-[-2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
-                FreeAPI Chat App
+                Threadly
             </h1>
             <div className="neo my-10 flex w-1/2 max-w-5xl flex-col items-center justify-center gap-5 bg-retro-orange p-8">
                 <h1 className="neo-sm flex flex-col items-center bg-cream px-6 py-2 text-2xl">
-                    <LockClosedIcon className="mb-2 h-8 w-8" /> Login
+                    <LockClosedIcon className="mb-2 h-8 w-8 text-retro-orange" /> Login
                 </h1>
                 <Input
                     placeholder="Enter the username..."
