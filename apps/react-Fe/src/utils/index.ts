@@ -47,6 +47,72 @@ export const classNames = (...className: string[]) => {
 // Check if the code is running in a browser environment
 export const isBrowser = typeof window !== "undefined";
 
+// Classify an attachment so the UI can pick the right rendering. For files
+// uploaded before the mimetype was stored, fall back to the URL extension.
+export const getFileKind = (
+  url?: string,
+  mimetype?: string,
+): "image" | "video" | "pdf" | "file" => {
+  const mime = (mimetype ?? "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime === "application/pdf") return "pdf";
+  const rawExt = (url ?? "").split("?")[0].split(".").pop() ?? "";
+  const ext = rawExt.toLowerCase();
+  if (["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif"].includes(ext))
+    return "image";
+  if (["mp4", "webm", "mov", "ogg", "mkv"].includes(ext)) return "video";
+  if (ext === "pdf") return "pdf";
+  return "file";
+};
+
+export const formatBytes = (bytes?: number) => {
+  if (!bytes || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+};
+
+// Real download instead of an <a download> link. The download attribute is
+// ignored for cross-origin resources (e.g. Cloudinary), which makes the
+// browser navigate to the object-storage page instead of downloading. We
+// proxy the file through the backend (which sets Content-Disposition:
+// attachment) and download the resulting blob from our own origin.
+export const downloadFile = async (url: string, fileName?: string) => {
+  const token = LocalStorage.get("token");
+  const apiUri = (import.meta.env.VITE_SERVER_URI as string | undefined) ?? "";
+  const name = fileName || url.split("?")[0].split("/").pop() || "download";
+  const params = new URLSearchParams({ url, filename: name });
+  // VITE_SERVER_URI already ends with "/api/v1" (same base the axios client
+  // uses), so only append the route, otherwise the path gets duplicated.
+  const proxyUrl = `${apiUri.replace(/\/+$/, "")}/messages/attachments/download?${params.toString()}`;
+
+  try {
+    const response = await fetch(proxyUrl, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    console.info("[download] status", response.status, "bytes-will-be", response.headers.get("content-length"));
+    if (!response.ok) throw new Error("bad response");
+    const blob = await response.blob();
+    console.info("[download] blob size", blob.size, "type", blob.type);
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = name;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    // Last resort: open the storage URL in a new tab so the chat page isn't
+    // lost.
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+};
+
 // This utility function generates metadata for chat objects.
 // It takes into consideration both group chats and individual chats.
 export const getChatObjectMetadata = (

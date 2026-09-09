@@ -77,7 +77,8 @@ const CallModal: React.FC<CallModalProps> = ({
             playsInline
             className="pointer-events-none absolute h-0 w-0 opacity-0"
             ref={(audio) => {
-              if (audio) audio.srcObject = remoteStream;
+              if (audio && audio.srcObject !== remoteStream)
+                audio.srcObject = remoteStream;
             }}
           />
         )}
@@ -221,7 +222,8 @@ const CallModal: React.FC<CallModalProps> = ({
               autoPlay
               playsInline
               ref={(video) => {
-                if (video) video.srcObject = remoteStream;
+                if (video && video.srcObject !== remoteStream)
+                  video.srcObject = remoteStream;
               }}
               className={classNames(
                 "h-full w-full object-cover",
@@ -237,7 +239,7 @@ const CallModal: React.FC<CallModalProps> = ({
             </div>
           )}
           <span className="absolute left-2 top-2 rounded-sm bg-retro-yellow px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wider text-ink">
-            Remote
+            {remoteName || "Remote"}
           </span>
           {remoteStream && statusText && (
             <span
@@ -262,7 +264,8 @@ const CallModal: React.FC<CallModalProps> = ({
               playsInline
               muted
               ref={(video) => {
-                if (video) video.srcObject = localStream;
+                if (video && video.srcObject !== localStream)
+                  video.srcObject = localStream;
               }}
               className={classNames(
                 "h-full w-full object-cover",

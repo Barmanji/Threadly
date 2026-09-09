@@ -1,5 +1,6 @@
 import {
     ArrowDownTrayIcon,
+    DocumentIcon,
     EllipsisVerticalIcon,
     MagnifyingGlassPlusIcon,
     PaperClipIcon,
@@ -7,9 +8,9 @@ import {
     XMarkIcon,
 } from "@heroicons/react/20/solid";
 import moment from "moment";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ChatMessageInterface } from "../../interfaces/chat";
-import { classNames } from "../../utils";
+import { classNames, formatBytes, getFileKind, downloadFile } from "../../utils";
 import RetroConfirm from "../RetroConfirm";
 const MessageItem: React.FC<{
     isOwnMessage?: boolean;
@@ -21,6 +22,29 @@ const MessageItem: React.FC<{
     const [openOptions, setopenOptions] = useState<boolean>(false);
     const [confirmDeleteMessage, setConfirmDeleteMessage] =
         useState<boolean>(false);
+
+    // Close the enlarged-image viewer when the user presses Escape.
+    useEffect(() => {
+        if (!resizedImage) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === "Escape") setResizedImage(null);
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [resizedImage]);
+
+    const handleDownload = (
+        e: React.MouseEvent,
+        url: string,
+        fileName?: string,
+    ) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void downloadFile(
+            url,
+            fileName || url.split("?")[0].split("/").pop() || "download",
+        );
+    };
 
     return (
         <>
@@ -55,7 +79,7 @@ const MessageItem: React.FC<{
                             : "rounded-tl-none bg-white",
                     )}
                 >
-                    {isOwnMessage ? (
+                    {isOwnMessage && !message.sending ? (
                         <div className="absolute top-2 right-2 z-30">
                             <button
                                 className="p-1 options-button"
@@ -97,7 +121,7 @@ const MessageItem: React.FC<{
                         <div>
                             <div
                                 className={classNames(
-                                    "grid max-w-7xl gap-2",
+                                    "grid max-w-xl gap-2",
                                     message.attachments?.length === 1
                                         ? " grid-cols-1"
                                         : "",
@@ -111,36 +135,86 @@ const MessageItem: React.FC<{
                                 )}
                             >
                                 {message.attachments?.map((file) => {
+                                    const kind = getFileKind(
+                                        file.url,
+                                        file.mimetype,
+                                    );
+                                    const isFileCard =
+                                        kind === "pdf" || kind === "file";
                                     return (
                                         <div
-                                            key={file._id}
-                                            className="group relative aspect-square rounded-xl overflow-hidden cursor-pointer"
+                                            key={file._id || file.url}
+                                            className={classNames(
+                                                "group relative overflow-hidden border-2 border-ink",
+                                                kind === "image"
+                                                    ? "aspect-square cursor-pointer"
+                                                    : kind === "video"
+                                                    ? "aspect-video bg-black"
+                                                    : "h-24 bg-retro-yellow cursor-pointer",
+                                            )}
                                         >
-                                            <button
-                                                onClick={() =>
-                                                    setResizedImage(file.url)
-                                                }
-                                                className="absolute inset-0 z-20 flex justify-center items-center w-full gap-2 h-full bg-black/60 group-hover:opacity-100 opacity-0 transition-opacity ease-in-out duration-150"
-                                            >
-                                                <MagnifyingGlassPlusIcon className="h-6 w-6 text-white" />
-                                                <a
-                                                    href={file.url}
-                                                    download
-                                                    onClick={(e) =>
-                                                        e.stopPropagation()
-                                                    }
-                                                >
-                                                    <ArrowDownTrayIcon
-                                                        title="download"
-                                                        className="hover:text-retro-orange h-6 w-6 text-white cursor-pointer"
+                                            {kind === "image" ? (
+                                                <>
+                                                    <button
+                                                        onClick={() =>
+                                                            setResizedImage(
+                                                                file.url,
+                                                            )
+                                                        }
+                                                        className="absolute inset-0 z-20 flex justify-center items-center w-full gap-2 h-full bg-black/60 group-hover:opacity-100 opacity-0 transition-opacity ease-in-out duration-150"
+                                                    >
+                                                        <MagnifyingGlassPlusIcon className="h-6 w-6 text-white" />
+                                                    </button>
+                                                    <img
+                                                        className="h-full w-full object-cover"
+                                                        src={file.url}
+                                                        alt="msg_img"
                                                     />
-                                                </a>
-                                            </button>
-                                            <img
-                                                className="h-full w-full object-cover"
-                                                src={file.url}
-                                                alt="msg_img"
-                                            />
+                                                </>
+                                            ) : kind === "video" ? (
+                                                <video
+                                                    controls
+                                                    playsInline
+                                                    preload="metadata"
+                                                    src={file.url}
+                                                    className="h-full w-full object-contain"
+                                                />
+                                            ) : isFileCard ? (
+                                                <div className="flex h-full w-full items-center gap-2 p-2">
+                                                    <DocumentIcon className="h-8 w-8 flex-shrink-0 text-ink" />
+                                                    <div className="min-w-0">
+                                                        <p className="truncate text-xs font-bold text-ink">
+                                                            {file.fileName ||
+                                                                file.url
+                                                                    .split(
+                                                                        "?",
+                                                                    )[0]
+                                                                    .split("/")
+                                                                    .pop()}
+                                                        </p>
+                                                        <p className="text-[10px] font-semibold text-ink/70">
+                                                            {formatBytes(
+                                                                file.size,
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            ) : null}
+                                            {!message.sending ? (
+                                                <button
+                                                    title="download"
+                                                    onClick={(e) =>
+                                                        handleDownload(
+                                                            e,
+                                                            file.url,
+                                                            file.fileName,
+                                                        )
+                                                    }
+                                                    className="absolute top-1 right-1 z-30 flex h-6 w-6 items-center justify-center bg-black/60 hover:bg-retro-orange"
+                                                >
+                                                    <ArrowDownTrayIcon className="h-4 w-4 text-white" />
+                                                </button>
+                                            ) : null}
                                         </div>
                                     );
                                 })}
@@ -152,20 +226,27 @@ const MessageItem: React.FC<{
                             <p className="text-sm text-ink">{message.content}</p>
                         </div>
                     ) : null}
-                    <p
-                        className={classNames(
-                            "mt-1.5 self-end text-[10px] inline-flex items-center",
-                            isOwnMessage ? "text-ink/70" : "text-ink/60",
-                        )}
-                    >
-                        {message.attachments?.length > 0 ? (
-                            <PaperClipIcon className="h-4 w-4 mr-2 " />
-                        ) : null}
-                        {moment(message.updatedAt)
-                            .add("TIME_ZONE", "hours")
-                            .fromNow(true)}{" "}
-                        ago
-                    </p>
+                    {message.sending ? (
+                        <p className="mt-1.5 text-[10px] font-bold text-ink/60 inline-flex items-center gap-1.5">
+                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ink/60 border-t-transparent" />
+                            sending…
+                        </p>
+                    ) : (
+                        <p
+                            className={classNames(
+                                "mt-1.5 self-end text-[10px] inline-flex items-center",
+                                isOwnMessage ? "text-ink/70" : "text-ink/60",
+                            )}
+                        >
+                            {message.attachments?.length > 0 ? (
+                                <PaperClipIcon className="h-4 w-4 mr-2 " />
+                            ) : null}
+                            {moment(message.updatedAt)
+                                .add("TIME_ZONE", "hours")
+                                .fromNow(true)}{" "}
+                            ago
+                        </p>
+                    )}
                 </div>
             </div>
 
