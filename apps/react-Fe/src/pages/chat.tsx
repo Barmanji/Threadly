@@ -1,10 +1,12 @@
 import {
   PaperAirplaneIcon,
   PaperClipIcon,
+  PlusIcon,
   XCircleIcon,
   VideoCameraIcon,
   PhoneIcon,
 } from "@heroicons/react/20/solid";
+import { toast } from "sonner";
 import { useEffect, useRef, useState } from "react";
 import {
   deleteMessage,
@@ -22,6 +24,8 @@ import { useSocket } from "../context/SocketContext";
 import { useWebRTC } from "../context/WebRTCContext";
 import CallModal from "../components/call/CallModal";
 import IncomingCallModal from "../components/call/IncomingCallModal";
+import GroupCallModal from "../components/call/GroupCallModal";
+import GroupCallNotification from "../components/call/GroupCallNotification";
 import type {
   ChatListItemInterface,
   ChatMessageInterface,
@@ -45,13 +49,15 @@ const UPDATE_GROUP_NAME_EVENT = "updateGroupName";
 const MESSAGE_DELETE_EVENT = "messageDeleted";
 // const SOCKET_ERROR_EVENT = "socketError";
 
+// Fallback label when a typing event arrives without sender details.
+const isTypingGroupFallbackName = (isGroupChat?: boolean) =>
+  isGroupChat ? "someone" : "";
+
 const ChatPage = () => {
   // Import the 'useAuth' and 'useSocket' hooks from their respective contexts
   const { user, logout } = useAuth();
   const { socket } = useSocket();
-  const { startCall, incomingCall, acceptIncomingCall, rejectIncomingCall } =
-    useWebRTC();
-
+  const { startCall } = useWebRTC();
   // Create a reference using 'useRef' to hold the currently selected chat.
   // 'useRef' is used here because it ensures that the 'currentChat' value within socket event callbacks
   // will always refer to the latest value, even if the component re-renders.
@@ -59,6 +65,12 @@ const ChatPage = () => {
 
   // To keep track of the setTimeout function
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Per-user safety timers so the "typing" indicator disappears even if the
+  // stop-typing event gets lost in transit. Keyed by `${chatId}:${userId}`.
+  const typingUserTimeoutsRef = useRef<
+    Record<string, NodeJS.Timeout | undefined>
+  >({});
 
   // Define state variables and their initial values using 'useState'
   const [isConnected, setIsConnected] = useState(false); // For tracking socket connection
@@ -73,7 +85,10 @@ const ChatPage = () => {
     [],
   ); // To track unread messages
 
-  const [isTyping, setIsTyping] = useState(false); // To track if someone is currently typing
+  // Map of chatId -> userId -> { _id, username } currently typing in that chat
+  const [typingUsers, setTypingUsers] = useState<
+    Record<string, Record<string, { _id: string; username: string }>>
+  >({});
   const [selfTyping, setSelfTyping] = useState(false); // To track if the current user is typing
 
   const [message, setMessage] = useState(""); // To store the currently typed message
@@ -125,7 +140,7 @@ const ChatPage = () => {
           chatToUpdate.lastMessage = data[0];
           setChats([...chats]);
         },
-        alert,
+        (err) => toast.error(err),
       );
     }
   };
@@ -138,16 +153,16 @@ const ChatPage = () => {
         const { data } = res;
         setChats(data || []);
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
   const getMessages = async () => {
     // Check if a chat is selected, if not, show an alert
-    if (!currentChat.current?._id) return alert("No chat is selected");
+    if (!currentChat.current?._id) return toast.error("No chat is selected");
 
     // Check if socket is available, if not, show an alert
-    if (!socket) return alert("Socket not available");
+    if (!socket) return toast.error("Socket not available");
 
     // Emit an event to join the current chat
     socket.emit(JOIN_CHAT_EVENT, currentChat.current?._id);
@@ -169,7 +184,7 @@ const ChatPage = () => {
         setMessages(data || []);
       },
       // Display any error alerts if they occur during the fetch
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -179,7 +194,10 @@ const ChatPage = () => {
     if (!currentChat.current?._id || !socket) return;
 
     // Emit a STOP_TYPING_EVENT to inform other users/participants that typing has stopped
-    socket.emit(STOP_TYPING_EVENT, currentChat.current?._id);
+    socket.emit(STOP_TYPING_EVENT, {
+      chatId: currentChat.current?._id,
+      sender: { _id: user?._id, username: user?.username },
+    });
 
     // NOTE: debugging
     console.log("Socket status:", { socket: !!socket, isConnected });
@@ -208,7 +226,7 @@ const ChatPage = () => {
       },
 
       // If there's an error during the message sending process, raise an alert
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -223,7 +241,7 @@ const ChatPage = () => {
         setMessages((prev) => prev.filter((msg) => msg._id !== res.data._id));
         updateChatLastMessageOnDeletion(message.chat, message);
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -232,7 +250,7 @@ const ChatPage = () => {
     setMessage(e.target.value);
 
     // If socket doesn't exist or isn't connected, exit the function
-    if (!socket || !isConnected) return;
+    if (!socket?.connected) return;
 
     // Check if the user isn't already set as typing
     if (!selfTyping) {
@@ -240,7 +258,10 @@ const ChatPage = () => {
       setSelfTyping(true);
 
       // Emit a typing event to the server for the current chat
-      socket.emit(TYPING_EVENT, currentChat.current?._id);
+      socket.emit(TYPING_EVENT, {
+        chatId: currentChat.current?._id,
+        sender: { _id: user?._id, username: user?.username },
+      });
     }
 
     // Clear the previous timeout (if exists) to avoid multiple setTimeouts from running
@@ -254,7 +275,10 @@ const ChatPage = () => {
     // Set a timeout to stop the typing indication after the timerLength has passed
     typingTimeoutRef.current = setTimeout(() => {
       // Emit a stop typing event to the server for the current chat
-      socket.emit(STOP_TYPING_EVENT, currentChat.current?._id);
+      socket.emit(STOP_TYPING_EVENT, {
+        chatId: currentChat.current?._id,
+        sender: { _id: user?._id, username: user?.username },
+      });
 
       // Reset the user's typing state
       setSelfTyping(false);
@@ -272,23 +296,83 @@ const ChatPage = () => {
   /**
    * Handles the "typing" event on the socket.
    */
-  const handleOnSocketTyping = (chatId: string) => {
-    // Check if the typing event is for the currently active chat.
-    if (chatId !== currentChat.current?._id) return;
+  const handleOnSocketTyping = (
+    payload:
+      | string
+      | { chatId: string; sender?: { _id: string; username: string } },
+  ) => {
+    const chatId = typeof payload === "string" ? payload : payload?.chatId;
+    // The typing event may target any chat (not just the active one),
+    // so we always record it keyed by chatId.
+    if (!chatId) return;
 
-    // Set the typing state to true for the current chat.
-    setIsTyping(true);
+    const sender = typeof payload === "string" ? undefined : payload?.sender;
+    const key = sender?._id || "unknown";
+    const typingUser = sender ?? {
+      _id: key,
+      username: isTypingGroupFallbackName(
+        chats.find((c) => c._id === chatId)?.isGroupChat,
+      ),
+    };
+
+    // Add the sender to the set of people currently typing in that chat.
+    setTypingUsers((prev) => ({
+      ...prev,
+      [chatId]: { ...prev[chatId], [key]: typingUser },
+    }));
+
+    // Safety: auto-hide the indicator if the stop-typing event is missed.
+    const timerKey = `${chatId}:${key}`;
+    if (typingUserTimeoutsRef.current[timerKey]) {
+      clearTimeout(typingUserTimeoutsRef.current[timerKey]);
+    }
+    typingUserTimeoutsRef.current[timerKey] = setTimeout(() => {
+      setTypingUsers((prev) => {
+        const next = { ...prev };
+        const perChat = { ...next[chatId] };
+        delete perChat[key];
+        if (Object.keys(perChat).length === 0) {
+          delete next[chatId];
+        } else {
+          next[chatId] = perChat;
+        }
+        return next;
+      });
+      delete typingUserTimeoutsRef.current[timerKey];
+    }, 5000);
   };
 
   /**
    * Handles the "stop typing" event on the socket.
    */
-  const handleOnSocketStopTyping = (chatId: string) => {
-    // Check if the stop typing event is for the currently active chat.
-    if (chatId !== currentChat.current?._id) return;
+  const handleOnSocketStopTyping = (
+    payload:
+      | string
+      | { chatId: string; sender?: { _id: string; username: string } },
+  ) => {
+    const chatId = typeof payload === "string" ? payload : payload?.chatId;
+    if (!chatId) return;
 
-    // Set the typing state to false for the current chat.
-    setIsTyping(false);
+    const sender = typeof payload === "string" ? undefined : payload?.sender;
+    const key = sender?._id || "unknown";
+    const timerKey = `${chatId}:${key}`;
+    if (typingUserTimeoutsRef.current[timerKey]) {
+      clearTimeout(typingUserTimeoutsRef.current[timerKey]);
+      delete typingUserTimeoutsRef.current[timerKey];
+    }
+
+    // Remove the sender from the set of people currently typing in that chat.
+    setTypingUsers((prev) => {
+      const next = { ...prev };
+      const perChat = { ...next[chatId] };
+      delete perChat[key];
+      if (Object.keys(perChat).length === 0) {
+        delete next[chatId];
+      } else {
+        next[chatId] = perChat;
+      }
+      return next;
+    });
   };
 
   const onMessageDelete = (message: ChatMessageInterface) => {
@@ -311,6 +395,29 @@ const ChatPage = () => {
     console.log("📨 Socket message received:", message);
 
     // FIX: END ---------------------------------
+
+    // The sender is no longer typing since they delivered a message
+    const senderId = message.sender?._id;
+    const chatId = message.chat;
+    if (senderId && chatId) {
+      // Clear that chat's typing indicator for this sender
+      const timerKey = `${chatId}:${senderId}`;
+      if (typingUserTimeoutsRef.current[timerKey]) {
+        clearTimeout(typingUserTimeoutsRef.current[timerKey]);
+        delete typingUserTimeoutsRef.current[timerKey];
+      }
+      setTypingUsers((prev) => {
+        const next = { ...prev };
+        const perChat = { ...next[chatId] };
+        delete perChat[senderId];
+        if (Object.keys(perChat).length === 0) {
+          delete next[chatId];
+        } else {
+          next[chatId] = perChat;
+        }
+        return next;
+      });
+    }
 
     // Check if the received message belongs to the currently active chat
     if (message?.chat !== currentChat.current?._id) {
@@ -367,7 +474,6 @@ const ChatPage = () => {
     ]);
   };
 
-
   useEffect(() => {
     // Fetch the chat list from the server.
     getChats();
@@ -385,6 +491,17 @@ const ChatPage = () => {
       getMessages();
     }
     // An empty dependency array ensures this useEffect runs only once, similar to componentDidMount.
+  }, []);
+
+  // Clean up typing timers on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      Object.values(typingUserTimeoutsRef.current).forEach((t) => {
+        if (t) clearTimeout(t);
+      });
+      typingUserTimeoutsRef.current = {};
+    };
   }, []);
 
   // This useEffect handles the setting up and tearing down of socket event listeners.
@@ -450,6 +567,50 @@ const ChatPage = () => {
     // updating on each `useEffect` call but on each socket call.
   }, [socket, chats]);
 
+  // Metadata for the current chat (used to display the remote user in the call UI)
+  const currentChatMetadata = currentChat.current
+    ? getChatObjectMetadata(currentChat.current, user!)
+    : null;
+
+  // Active chat's typing users
+  const activeChatTyping = currentChat.current?._id
+    ? typingUsers[currentChat.current._id] || {}
+    : {};
+  // List of distinct people typing in the active chat
+  const typingUsersList = Object.values(activeChatTyping).filter(
+    (t) => t._id && t._id !== user?._id,
+  );
+  const isTyping = typingUsersList.length > 0;
+  // Label shown only in group chats, e.g. "John is typing" / "John and Sam are typing"
+  let typingLabel: string | undefined;
+  if (isTyping && currentChat.current?.isGroupChat) {
+    if (typingUsersList.length === 1) {
+      typingLabel = `${typingUsersList[0].username || "Someone"} is typing`;
+    } else if (typingUsersList.length === 2) {
+      typingLabel = `${typingUsersList[0].username || "Someone"} and ${
+        typingUsersList[1].username || "Someone"
+      } are typing`;
+    } else {
+      typingLabel = "multiple people are typing";
+    }
+  }
+
+  // Helper to build the sidebar typing caption for a given chat
+  const getChatTypingCaption = (chat: ChatListItemInterface): string | null => {
+    const perChat = typingUsers[chat._id] || {};
+    const list = Object.values(perChat).filter(
+      (t) => t._id && t._id !== user?._id,
+    );
+    if (list.length === 0) return null;
+    if (!chat.isGroupChat) return "is typing...";
+    if (list.length === 1) return `${list[0]!.username || "Someone"} is typing...`;
+    if (list.length === 2)
+      return `${list[0]!.username || "Someone"} and ${
+        list[1]!.username || "Someone"
+      } are typing`;
+    return "multiple people are typing";
+  };
+
   return (
     <>
       <AddChatModal
@@ -462,89 +623,96 @@ const ChatPage = () => {
         }}
       />
 
-      <div className="w-full justify-between items-stretch h-screen flex flex-shrink-0">
-        <div className="w-1/3 relative ring-white overflow-y-auto px-4">
-          <div className="z-10 w-full sticky top-0 bg-dark py-4 flex justify-between items-center gap-4">
-            <button
-              type="button"
-              className="focus:outline-none text-white bg-purple-700 hover:bg-purple-800 focus:ring-4 focus:ring-purple-300 font-medium rounded-xl text-sm px-5 py-4 mb-2 dark:bg-purple-600 dark:hover:bg-purple-700 dark:focus:ring-purple-900 flex-shrink-0"
-              onClick={logout}
-            >
-              Log Out
-            </button>
+      <div className="w-full justify-between items-stretch h-screen flex flex-shrink-0 bg-cream overflow-hidden">
+        <div className="w-1/3 relative overflow-y-auto">
+          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink p-4 flex flex-col justify-between items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
+            <div className="flex items-center justify-between gap-2 sm:justify-start">
+              <button
+                type="button"
+                className="neo neo-press inline-flex h-12 flex-shrink-0 items-center justify-center whitespace-nowrap bg-retro-red px-4 text-xs font-extrabold uppercase tracking-wide text-paper focus:outline-none sm:h-14 sm:px-5 sm:text-sm"
+                onClick={logout}
+              >
+                Log Out
+              </button>
 
+              <button
+                onClick={() => setOpenAddChat(true)}
+                className="neo neo-press inline-flex h-12 flex-shrink-0 items-center justify-center whitespace-nowrap bg-retro-yellow px-4 text-xs font-extrabold uppercase tracking-wide text-ink sm:h-14 sm:px-5 sm:text-sm"
+              >
+                <PlusIcon className="mr-1 h-4 w-4" aria-hidden="true" />
+                Add chat
+              </button>
+            </div>
             <Input
               placeholder="Search user or group..."
               value={localSearchQuery}
               onChange={(e) =>
                 setLocalSearchQuery(e.target.value.toLowerCase())
               }
+              className="min-w-0 flex-1 sm:h-14"
             />
-            <button
-              onClick={() => setOpenAddChat(true)}
-              className="rounded-xl border-none bg-primary text-white py-4 px-5 flex flex-shrink-0"
-            >
-              + Add chat
-            </button>
           </div>
-          {loadingChats ? (
-            <div className="flex justify-center items-center h-[calc(100%-88px)]">
-              <Typing />
-            </div>
-          ) : (
-            // Iterating over the chats array
-            [...chats]
-              // Filtering chats based on a local search query
-              .filter((chat) =>
-                // If there's a localSearchQuery, filter chats that contain the query in their metadata title
-                localSearchQuery
-                  ? getChatObjectMetadata(chat, user!)
-                      .title?.toLocaleLowerCase()
-                      ?.includes(localSearchQuery)
-                  : // If there's no localSearchQuery, include all chats
-                    true,
-              )
-              .map((chat) => {
-                return (
-                  <ChatItem
-                    chat={chat}
-                    isActive={chat._id === currentChat.current?._id}
-                    unreadCount={
-                      unreadMessages.filter((n) => n.chat === chat._id).length
-                    }
-                    onClick={(chat) => {
-                      if (
-                        currentChat.current?._id &&
-                        currentChat.current?._id === chat._id
-                      )
-                        return;
-                      LocalStorage.set("currentChat", chat);
-                      currentChat.current = chat;
-                      setMessage("");
-                      getMessages();
-                    }}
-                    key={chat._id}
-                    onChatDelete={(chatId) => {
-                      setChats((prev) =>
-                        prev.filter((chat) => chat._id !== chatId),
-                      );
-                      if (currentChat.current?._id === chatId) {
-                        currentChat.current = null;
-                        LocalStorage.remove("currentChat");
+          <div className="px-4">
+            {loadingChats ? (
+              <div className="flex justify-center items-center h-[calc(100%-88px)]">
+                <Typing />
+              </div>
+            ) : (
+              // Iterating over the chats array
+              [...chats]
+                // Filtering chats based on a local search query
+                .filter((chat) =>
+                  // If there's a localSearchQuery, filter chats that contain the query in their metadata title
+                  localSearchQuery
+                    ? getChatObjectMetadata(chat, user!)
+                        .title?.toLocaleLowerCase()
+                        ?.includes(localSearchQuery)
+                    : // If there's no localSearchQuery, include all chats
+                      true,
+                )
+                .map((chat) => {
+                  return (
+                    <ChatItem
+                      chat={chat}
+                      isActive={chat._id === currentChat.current?._id}
+                      unreadCount={
+                        unreadMessages.filter((n) => n.chat === chat._id).length
                       }
-                    }}
-                  />
-                );
-              })
-          )}
+                      onClick={(chat) => {
+                        if (
+                          currentChat.current?._id &&
+                          currentChat.current?._id === chat._id
+                        )
+                          return;
+                        LocalStorage.set("currentChat", chat);
+                        currentChat.current = chat;
+                        setMessage("");
+                        getMessages();
+                      }}
+                      key={chat._id}
+                      typingCaption={getChatTypingCaption(chat)}
+                      onChatDelete={(chatId) => {
+                        setChats((prev) =>
+                          prev.filter((chat) => chat._id !== chatId),
+                        );
+                        if (currentChat.current?._id === chatId) {
+                          currentChat.current = null;
+                          LocalStorage.remove("currentChat");
+                        }
+                      }}
+                    />
+                  );
+                })
+            )}
+          </div>
         </div>
-        <div className="w-2/3 border-l-[0.1px] border-secondary">
+        <div className="w-2/3 border-l-4 border-ink flex flex-col min-h-0">
           {currentChat.current && currentChat.current?._id ? (
             <>
-              <div className="p-4 sticky top-0 bg-dark z-20 flex justify-between items-center w-full border-b-[0.1px] border-secondary">
+              <div className="p-4 bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
                 <div className="flex justify-start items-center w-max gap-3">
                   {currentChat.current.isGroupChat ? (
-                    <div className="w-12 relative h-12 flex-shrink-0 flex justify-start items-center flex-nowrap">
+                    <div className="w-14 relative h-14 flex-shrink-0 flex justify-start items-center flex-nowrap">
                       {currentChat.current.participants
                         .slice(0, 3)
                         .map((participant, i) => {
@@ -553,7 +721,7 @@ const ChatPage = () => {
                               key={participant._id}
                               src={participant.avatar}
                               className={classNames(
-                                "w-9 h-9 border-[1px] border-white rounded-full absolute outline outline-4 outline-dark",
+                                "w-9 h-9 border-[3px] border-ink rounded-sm absolute",
                                 i === 0
                                   ? "left-0 z-30"
                                   : i === 1
@@ -568,17 +736,17 @@ const ChatPage = () => {
                     </div>
                   ) : (
                     <img
-                      className="h-14 w-14 rounded-full flex flex-shrink-0 object-cover"
+                      className="h-14 w-14 flex-shrink-0 rounded-sm border-[3px] border-ink object-cover"
                       src={
                         getChatObjectMetadata(currentChat.current, user!).avatar
                       }
                     />
                   )}
                   <div>
-                    <p className="font-bold">
+                    <p className="font-extrabold uppercase tracking-wide text-ink">
                       {getChatObjectMetadata(currentChat.current, user!).title}
                     </p>
-                    <small className="text-zinc-400">
+                    <small className="text-ink/60">
                       {
                         getChatObjectMetadata(currentChat.current, user!)
                           .description
@@ -588,72 +756,108 @@ const ChatPage = () => {
                 </div>
                 {
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        const recipient =
-                          currentChat.current?.participants.find(
-                            (p) => p._id !== user?._id,
-                          );
-                        if (recipient) {
-                          startCall(recipient._id, "audio");
-                        }
-                      }}
-                      className="p-2 rounded-full bg-dark hover:bg-secondary"
-                    >
-                      <PhoneIcon className="w-6 h-6" />
-                    </button>
-                    <button
-                      onClick={() => {
-                        const recipient =
-                          currentChat.current?.participants.find(
-                            (p) => p._id !== user?._id,
-                          );
-                        if (recipient) {
-                          startCall(recipient._id, "video");
-                        }
-                      }}
-                      className="p-2 rounded-full bg-dark hover:bg-secondary"
-                    >
-                      <VideoCameraIcon className="w-6 h-6" />
-                    </button>
-
+                    {currentChat.current?.isGroupChat ? (
+                      <>
+                        <button
+                          onClick={() => {
+                            toast.info("Group calling is work in progress");
+                          }}
+                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                        >
+                          <PhoneIcon className="w-6 h-6" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            toast.info("Group calling is work in progress");
+                          }}
+                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                        >
+                          <VideoCameraIcon className="w-6 h-6" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => {
+                            const recipient =
+                              currentChat.current?.participants.find(
+                                (p) => p._id !== user?._id,
+                              );
+                            if (recipient) {
+                              startCall(recipient._id, "audio");
+                              toast.info(`Calling ${recipient.username}...`);
+                            }
+                          }}
+                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                        >
+                          <PhoneIcon className="w-6 h-6" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            const recipient =
+                              currentChat.current?.participants.find(
+                                (p) => p._id !== user?._id,
+                              );
+                            if (recipient) {
+                              startCall(recipient._id, "video");
+                              toast.info(`Calling ${recipient.username}...`);
+                            }
+                          }}
+                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                        >
+                          <VideoCameraIcon className="w-6 h-6" />
+                        </button>
+                      </>
+                    )}
                   </div>
                 }
               </div>
-              <CallModal />
+              <CallModal
+                chatId={currentChat.current?._id}
+                remoteAvatar={currentChatMetadata?.avatar}
+                remoteName={currentChatMetadata?.title}
+                localAvatar={user?.avatar}
+              />
+              <GroupCallModal chatId={currentChat.current?._id} />
+              <GroupCallNotification />
               <IncomingCallModal />
-              <div
-                className={classNames(
-                  "p-8 overflow-y-auto flex flex-col-reverse gap-6 w-full",
-                  attachedFiles.length > 0
-                    ? "h-[calc(100vh-336px)]"
-                    : "h-[calc(100vh-176px)]",
-                )}
-                id="message-window"
-              >
-                {loadingMessages ? (
-                  <div className="flex justify-center items-center h-[calc(100%-88px)]">
-                    <Typing />
+              <div className="relative w-full flex-1 min-h-0">
+                <div
+                  className={classNames(
+                    "bg-doodle p-8 overflow-y-auto flex flex-col-reverse gap-6 w-full h-full",
+                  )}
+                  id="message-window"
+                >
+                  {loadingMessages ? (
+                    <div className="flex justify-center items-center h-full">
+                      <Typing />
+                    </div>
+                  ) : (
+                    <>
+                      {messages?.map((msg) => {
+                        return (
+                          <MessageItem
+                            key={msg._id}
+                            isOwnMessage={msg.sender?._id === user?._id}
+                            isGroupChatMessage={
+                              currentChat.current?.isGroupChat
+                            }
+                            message={msg}
+                            deleteChatMessage={deleteChatMessage}
+                          />
+                        );
+                      })}
+                    </>
+                  )}
+                </div>
+                {isTyping ? (
+                  <div className="absolute bottom-4 left-8 z-10">
+                    <Typing label={typingLabel} />
                   </div>
-                ) : (
-                  <>
-                    {isTyping ? <Typing /> : null}
-                    {messages?.map((msg) => {
-                      return (
-                        <MessageItem
-                          key={msg._id}
-                          isOwnMessage={msg.sender?._id === user?._id}
-                          isGroupChatMessage={currentChat.current?.isGroupChat}
-                          message={msg}
-                          deleteChatMessage={deleteChatMessage}
-                        />
-                      );
-                    })}
-                  </>
-                )}
+                ) : null}
               </div>
               {attachedFiles.length > 0 ? (
-                <div className="grid gap-4 grid-cols-5 p-4 justify-start max-w-fit">
+                <div className="grid gap-4 grid-cols-5 p-4 justify-start max-w-fit flex-shrink-0">
                   {attachedFiles.map((file, i) => {
                     return (
                       <div
@@ -682,7 +886,7 @@ const ChatPage = () => {
                   })}
                 </div>
               ) : null}
-              <div className="sticky top-full p-4 flex justify-between items-center w-full gap-2 border-t-[0.1px] border-secondary">
+              <div className="p-4 flex flex-shrink-0 justify-between items-center w-full gap-2 border-t-4 border-ink bg-cream">
                 <input
                   hidden
                   id="attachments"
@@ -698,7 +902,7 @@ const ChatPage = () => {
                 />
                 <label
                   htmlFor="attachments"
-                  className="p-4 rounded-full bg-dark hover:bg-secondary"
+                  className="neo-sm neo-press block cursor-pointer rounded-sm bg-cream p-4 text-ink hover:bg-retro-yellow"
                 >
                   <PaperClipIcon className="w-6 h-6" />
                 </label>
@@ -716,7 +920,7 @@ const ChatPage = () => {
                 <button
                   onClick={sendChatMessage}
                   disabled={!message && attachedFiles.length <= 0}
-                  className="p-4 rounded-full bg-dark hover:bg-secondary disabled:opacity-50"
+                  className="neo-sm neo-press rounded-sm bg-retro-yellow p-4 text-ink hover:bg-retro-orange disabled:pointer-events-none disabled:opacity-40"
                 >
                   <PaperAirplaneIcon className="w-6 h-6" />
                 </button>

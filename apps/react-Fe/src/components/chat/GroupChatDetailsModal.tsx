@@ -19,8 +19,10 @@ import { useAuth } from "../../context/AuthContext";
 import type { ChatListItemInterface } from "../../interfaces/chat";
 import type { UserInterface } from "../../interfaces/user";
 import { requestHandler } from "../../utils";
+import { toast } from "sonner";
 import Button from "../Button";
 import Input from "../Input";
+import RetroConfirm from "../RetroConfirm";
 import Select from "../Select";
 
 const GroupChatDetailsModal: React.FC<{
@@ -37,8 +39,11 @@ const GroupChatDetailsModal: React.FC<{
   const [groupDetails, setGroupDetails] =
     useState<ChatListItemInterface | null>(null);
   const [users, setUsers] = useState<UserInterface[]>([]);
+  const [participantToRemove, setParticipantToRemove] =
+    useState<UserInterface | null>(null);
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(false);
   const handleGroupNameUpdate = async () => {
-    if (!newGroupName) return alert("Group name is required");
+    if (!newGroupName) return toast.error("Group name is required");
 
     requestHandler(
       async () => await updateGroupName(chatId, newGroupName),
@@ -48,9 +53,9 @@ const GroupChatDetailsModal: React.FC<{
         setGroupDetails(data);
         setNewGroupName(data.name);
         setRenamingGroup(false);
-        alert("Group name updated to " + data.name);
+        toast.success("Group name updated to " + data.name);
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -62,13 +67,13 @@ const GroupChatDetailsModal: React.FC<{
         const { data } = res;
         setUsers(data || []);
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
   const deleteGroupChat = async () => {
     if (groupDetails?.admin !== user?._id) {
-      return alert("You are not the admin of the group");
+      return toast.error("You are not the admin of the group");
     }
 
     requestHandler(
@@ -78,7 +83,7 @@ const GroupChatDetailsModal: React.FC<{
         onGroupDelete(chatId);
         handleClose();
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -97,15 +102,15 @@ const GroupChatDetailsModal: React.FC<{
             [],
         };
         setGroupDetails(updatedGroupDetails as ChatListItemInterface);
-        alert("Participant removed");
+        toast.success("Participant removed");
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
   const addParticipant = async () => {
     if (!participantToBeAdded)
-      return alert("Please select a participant to add.");
+      return toast.error("Please select a participant to add.");
     requestHandler(
       async () => await addParticipantToGroup(chatId, participantToBeAdded),
       null,
@@ -116,9 +121,9 @@ const GroupChatDetailsModal: React.FC<{
           participants: data?.participants || [],
         };
         setGroupDetails(updatedGroupDetails as ChatListItemInterface);
-        alert("Participant added");
+        toast.success("Participant added");
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -131,7 +136,7 @@ const GroupChatDetailsModal: React.FC<{
         setGroupDetails(data);
         setNewGroupName(data?.name || "");
       },
-      alert,
+      (err) => toast.error(err),
     );
   };
 
@@ -172,13 +177,13 @@ const GroupChatDetailsModal: React.FC<{
                 leaveTo="translate-x-full"
               >
                 <Dialog.Panel className="pointer-events-auto w-screen max-w-2xl">
-                  <div className="flex h-full flex-col overflow-y-scroll bg-secondary py-6 shadow-xl">
+                  <div className="flex h-full flex-col overflow-y-scroll bg-paper border-l-4 border-ink py-6 shadow-[8px_8px_0_0_var(--color-ink)]">
                     <div className="px-4 sm:px-6">
                       <div className="flex items-start justify-between">
                         <div className="ml-3 flex h-7 items-center">
                           <button
                             type="button"
-                            className="relative rounded-md bg-secondary text-zinc-400 hover:text-zinc-500 focus:outline-none"
+                            className="relative rounded-sm bg-paper text-ink hover:text-retro-red focus:outline-none"
                             onClick={handleClose}
                           >
                             <span className="absolute -inset-2.5" />
@@ -194,7 +199,7 @@ const GroupChatDetailsModal: React.FC<{
                           {groupDetails?.participants.slice(0, 3).map((p) => {
                             return (
                               <img
-                                className="w-24 h-24 -ml-16 rounded-full outline outline-4 outline-secondary"
+                                className="w-24 h-24 -ml-16 rounded-sm border-[3px] border-ink object-cover"
                                 key={p._id}
                                 src={p.avatar}
                                 alt="avatar"
@@ -203,7 +208,9 @@ const GroupChatDetailsModal: React.FC<{
                           })}
                           {groupDetails?.participants &&
                           groupDetails?.participants.length > 3 ? (
-                            <p>+{groupDetails?.participants.length - 3}</p>
+                            <p className="text-ink font-extrabold">
+                              +{groupDetails?.participants.length - 3}
+                            </p>
                           ) : null}
                         </div>
                         <div className="w-full flex flex-col justify-center items-center text-center">
@@ -231,25 +238,25 @@ const GroupChatDetailsModal: React.FC<{
                             </div>
                           ) : (
                             <div className="w-full inline-flex justify-center items-center text-center mt-5">
-                              <h1 className="text-2xl font-semibold truncate-1">
+                              <h1 className="text-2xl font-extrabold uppercase tracking-wide text-ink truncate-1">
                                 {groupDetails?.name}
                               </h1>
                               {groupDetails?.admin === user?._id ? (
                                 <button onClick={() => setRenamingGroup(true)}>
-                                  <PencilIcon className="w-5 h-5 ml-4" />
+                                  <PencilIcon className="w-5 h-5 ml-4 text-ink hover:text-retro-orange" />
                                 </button>
                               ) : null}
                             </div>
                           )}
 
-                          <p className="mt-2 text-zinc-400 text-sm">
+                          <p className="mt-2 text-ink/60 text-sm">
                             Group · {groupDetails?.participants.length}{" "}
                             participants
                           </p>
                         </div>
-                        <hr className="border-[0.1px] border-zinc-600 my-5 w-full" />
+                        <hr className="border-[3px] border-ink my-5 w-full" />
                         <div className="w-full">
-                          <p className="inline-flex items-center">
+                          <p className="inline-flex items-center font-bold uppercase tracking-wide text-ink">
                             <UserGroupIcon className="h-6 w-6 mr-2" />{" "}
                             {groupDetails?.participants.length} Participants
                           </p>
@@ -260,19 +267,19 @@ const GroupChatDetailsModal: React.FC<{
                                   <div className="flex justify-between items-center w-full py-4">
                                     <div className="flex justify-start items-start gap-3 w-full">
                                       <img
-                                        className="h-12 w-12 rounded-full"
+                                        className="h-12 w-12 rounded-sm border-[3px] border-ink object-cover"
                                         src={part.avatar}
                                       />
                                       <div>
-                                        <p className="text-white font-semibold text-sm inline-flex items-center w-full">
+                                        <p className="text-ink font-semibold text-sm inline-flex items-center w-full">
                                           {part.username}{" "}
                                           {part._id === groupDetails.admin ? (
-                                            <span className="ml-2 text-[10px] px-4 bg-success/10 border-[0.1px] border-success rounded-full text-success">
+                                            <span className="ml-2 text-[10px] px-4 bg-retro-yellow border-2 border-ink rounded-sm text-ink font-bold">
                                               admin
                                             </span>
                                           ) : null}
                                         </p>
-                                        <small className="text-zinc-400">
+                                        <small className="text-ink/60">
                                           {part.email}
                                         </small>
                                       </div>
@@ -280,16 +287,9 @@ const GroupChatDetailsModal: React.FC<{
                                     {groupDetails.admin === user?._id ? (
                                       <div>
                                         <Button
-                                          onClick={() => {
-                                            const ok = confirm(
-                                              "Are you sure you want to remove " +
-                                                user.username +
-                                                " ?",
-                                            );
-                                            if (ok) {
-                                              removeParticipant(part._id || "");
-                                            }
-                                          }}
+                                          onClick={() =>
+                                            setParticipantToRemove(part)
+                                          }
                                           size="small"
                                           severity="danger"
                                         >
@@ -298,7 +298,7 @@ const GroupChatDetailsModal: React.FC<{
                                       </div>
                                     ) : null}
                                   </div>
-                                  <hr className="border-[0.1px] border-zinc-600 my-1 w-full" />
+                                  <hr className="border-[3px] border-ink my-1 w-full" />
                                 </React.Fragment>
                               );
                             })}
@@ -343,14 +343,7 @@ const GroupChatDetailsModal: React.FC<{
                                 <Button
                                   fullWidth
                                   severity="danger"
-                                  onClick={() => {
-                                    const ok = confirm(
-                                      "Are you sure you want to delete this group?",
-                                    );
-                                    if (ok) {
-                                      deleteGroupChat();
-                                    }
-                                  }}
+                                  onClick={() => setConfirmDeleteGroup(true)}
                                 >
                                   <TrashIcon className="w-5 h-5 mr-1" /> Delete
                                   group
@@ -368,6 +361,32 @@ const GroupChatDetailsModal: React.FC<{
           </div>
         </div>
       </Dialog>
+
+      <RetroConfirm
+        open={!!participantToRemove}
+        title="Remove participant"
+        message={`Are you sure you want to remove ${participantToRemove?.username} from this group?`}
+        confirmText="Remove"
+        onCancel={() => setParticipantToRemove(null)}
+        onConfirm={() => {
+          if (participantToRemove?._id) {
+            removeParticipant(participantToRemove._id);
+            setParticipantToRemove(null);
+          }
+        }}
+      />
+
+      <RetroConfirm
+        open={confirmDeleteGroup}
+        title="Delete group"
+        message="Are you sure you want to delete this group? This action cannot be undone."
+        confirmText="Delete"
+        onCancel={() => setConfirmDeleteGroup(false)}
+        onConfirm={() => {
+          setConfirmDeleteGroup(false);
+          deleteGroupChat();
+        }}
+      />
     </Transition.Root>
   );
 };
