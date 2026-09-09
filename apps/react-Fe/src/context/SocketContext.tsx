@@ -42,8 +42,15 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
   );
   const { token } = useAuth();
 
-  // Initialize or re-initialize the socket connection when token changes
+  // Initialize or re-initialize the socket connection when token changes.
+  // Only connect when there is a token: without one (login/register page),
+  // the backend rejects the handshake and the socketError handler below would
+  // otherwise reload the page in an infinite loop.
   useEffect(() => {
+    if (!token) {
+      setSocket(null);
+      return;
+    }
     const newSocket = getSocket(token);
     setSocket(newSocket);
     return () => {
@@ -57,11 +64,17 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // If the socket is rejected because of an invalid/expired token, log the user
   // out and redirect to the login page (same behavior as the API interceptor).
+  // The redirect is skipped when there is nothing to log out of or we are
+  // already on the login page to avoid reload loops.
   useEffect(() => {
     if (!socket) return;
     const handleSocketError = () => {
+      if (!token) return;
       LocalStorage.clear();
-      if (typeof window !== "undefined") {
+      if (
+        typeof window !== "undefined" &&
+        window.location.pathname !== "/login"
+      ) {
         window.location.href = "/login";
       }
     };
@@ -69,7 +82,7 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => {
       socket.off("socketError", handleSocketError);
     };
-  }, [socket]);
+  }, [socket, token]);
 
   return (
     // Provide the socket instance through context to its children
