@@ -49,9 +49,27 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => {
       try {
         newSocket.disconnect();
-      } catch (_) {}
+      } catch {
+        // Ignore errors while disconnecting a stale socket
+      }
     };
   }, [token]);
+
+  // If the socket is rejected because of an invalid/expired token, log the user
+  // out and redirect to the login page (same behavior as the API interceptor).
+  useEffect(() => {
+    if (!socket) return;
+    const handleSocketError = () => {
+      LocalStorage.clear();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+    };
+    socket.on("socketError", handleSocketError);
+    return () => {
+      socket.off("socketError", handleSocketError);
+    };
+  }, [socket]);
 
   return (
     // Provide the socket instance through context to its children

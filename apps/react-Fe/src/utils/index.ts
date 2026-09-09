@@ -3,14 +3,14 @@ import type { FreeAPISuccessResponseInterface } from "../interfaces/api";
 import type { ChatListItemInterface } from "../interfaces/chat";
 import type { UserInterface } from "../interfaces/user";
 
-export const requestHandler = async (
-  api: () => Promise<AxiosResponse<FreeAPISuccessResponseInterface, any>>,
+export const requestHandler = async <T>(
+  api: () => Promise<AxiosResponse<FreeAPISuccessResponseInterface<T>>>,
   setLoading: ((loading: boolean) => void) | null,
-  onSuccess: (data: FreeAPISuccessResponseInterface) => void,
+  onSuccess: (data: FreeAPISuccessResponseInterface<T>) => void,
   onError: (error: string) => void
 ) => {
   // Show loading state if setLoading function is provided
-  setLoading && setLoading(true);
+  if (setLoading) setLoading(true);
   try {
     // Make the API request
     const response = await api();
@@ -19,16 +19,22 @@ export const requestHandler = async (
       // Call the onSuccess callback with the response data
       onSuccess(data);
     }
-  } catch (error: any) {
-    // Handle error cases, including unauthorized and forbidden cases
-    if ([401, 403].includes(error?.response.data?.statusCode)) {
-      localStorage.clear(); // Clear local storage on authentication issues
-      if (isBrowser) window.location.href = "/login"; // Redirect to login page
-    }
-    onError(error?.response?.data?.message || "Something went wrong");
+  } catch (error: unknown) {
+    // Handle error cases. 401/403 (token expiry / auth failure) are already
+    // handled centrally by the axios interceptor in api/index.ts, which logs
+    // the user out and redirects to the login page when the tokens are exhausted.
+    const err = error as {
+      response?: { data?: { message?: string } };
+      message?: string;
+    };
+    onError(
+      err?.response?.data?.message ||
+        err?.message ||
+        "Something went wrong"
+    );
   } finally {
     // Hide loading state if setLoading function is provided
-    setLoading && setLoading(false);
+    if (setLoading) setLoading(false);
   }
 };
 
@@ -94,7 +100,7 @@ export class LocalStorage {
     if (value) {
       try {
         return JSON.parse(value);
-      } catch (err) {
+      } catch {
         return null;
       }
     }
@@ -102,7 +108,7 @@ export class LocalStorage {
   }
 
   // Set a value in local storage by key
-  static set(key: string, value: any) {
+  static set<T>(key: string, value: T) {
     if (!isBrowser) return;
     localStorage.setItem(key, JSON.stringify(value));
   }
