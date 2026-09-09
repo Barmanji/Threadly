@@ -9,13 +9,13 @@ cloudinary.config({
     api_secret: process.env.CLOUDNARY_APISECRET,
 });
 //let currentImage;
-const uploadResultCloudinary = async (localFilePath: string) => {
+const uploadResultCloudinary = async (localFilePath: string, resourceType: 'auto' | 'image' | 'video' | 'raw' = 'image') => {
     try {
         if(!localFilePath) return null;
         const responseCloudnary = await cloudinary.uploader.upload(
             localFilePath,
             {
-                resource_type: 'auto' //file has beed uploaded!
+                resource_type: resourceType //explicitly chosen: image/video/raw
             }
         )
         //this current image is not the right way!
