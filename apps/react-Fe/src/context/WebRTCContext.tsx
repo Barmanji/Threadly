@@ -67,6 +67,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const remotePeerIdRef = useRef<string | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const iceQueue = useRef<RTCIceCandidateInit[]>([]);
   const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -96,6 +97,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     setCallConnectionState("connecting");
     setIsCallInitiator(false);
     remotePeerIdRef.current = null;
+    remoteStreamRef.current = null;
     iceQueue.current = [];
   }, [localStream, clearDisconnectTimer]);
 
@@ -129,9 +131,25 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
     pc.ontrack = (event) => {
       console.log("Remote track event received");
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(new MediaStream(event.streams[0].getTracks()));
+      // Accumulate every track into ONE stable MediaStream. The remote is
+      // delivered as separate audio/video track events; if we recreated the
+      // stream on each one (and hence changed srcObject / stream id), the
+      // <video> element would glitch and flicker.
+      if (!remoteStreamRef.current) {
+        remoteStreamRef.current = new MediaStream();
       }
+      const tracks = event.streams && event.streams[0]
+        ? event.streams[0].getTracks()
+        : event.track
+          ? [event.track]
+          : [];
+      for (const track of tracks) {
+        const alreadyPresent = remoteStreamRef.current
+          .getTracks()
+          .some((t) => t.id === track.id);
+        if (!alreadyPresent) remoteStreamRef.current.addTrack(track);
+      }
+      setRemoteStream(remoteStreamRef.current);
     };
 
     // The WebRTC connection state is the source of truth for whether the peer
