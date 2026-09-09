@@ -5,4 +5,4 @@ allowBuilds:
   '@scarf/scarf': false
   core-js-pure: false
   esbuild: false
-  mediasoup: false
+  mediasoup: true
