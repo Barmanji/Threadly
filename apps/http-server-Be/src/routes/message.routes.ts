@@ -1,6 +1,7 @@
 import express, { Router } from "express";
 import {
     deleteMessage,
+    downloadAttachment,
     getAllMessages,
     sendMessage,
 } from "../controllers/message.controller";
@@ -13,6 +14,12 @@ import { validate } from "../validators/validate.js";
 const router: Router = express.Router();
 
 router.use(verifyJWT);
+
+// Proxy download of an attachment from object storage. Kept before the
+// "/:chatId" routes so "attachments" isn't treated as a chat id.
+router
+    .route("/attachments/download")
+    .get(downloadAttachment);
 
 router
     .route("/:chatId")
