@@ -3,7 +3,6 @@ class WebRTCSerice {
 
   constructor() {
     this._peer = new RTCPeerConnection({
-      //@ts-ignore
       // sdpSemantics: 'unified-plan',
       iceServers: [
         {
