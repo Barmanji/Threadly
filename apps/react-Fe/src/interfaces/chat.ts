@@ -16,9 +16,14 @@ export interface ChatMessageInterface {
   sender: Pick<UserInterface, "_id" | "avatar" | "email" | "username">;
   content: string;
   chat: string;
+  /** True for optimistic/local messages that haven't reached the server yet. */
+  sending?: boolean;
   attachments: {
     url: string;
-    localPath: string;
+    localPath?: string;
+    mimetype?: string;
+    fileName?: string;
+    size?: number;
     _id?: string;
   }[];
   createdAt: string;
