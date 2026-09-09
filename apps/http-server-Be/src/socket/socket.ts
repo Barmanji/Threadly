@@ -10,6 +10,34 @@ type AvailableChatEvents = (typeof ChatEventEnum)[keyof typeof ChatEventEnum];
 
 type SocketWithUser = Socket & { user?: Pick<IUser, "_id"> & Partial<IUser> };
 
+/**
+ * Tracks active 1:1 calls (userId -> peerUserId, both directions) so we can
+ * reliably notify the peer when one side drops the call — even if the client's
+ * "call-ended" event is lost (tab close, reload, network blip).
+ */
+const activeCalls = new Map<string, string>();
+
+const registerCall = (a: string, b: string): void => {
+  if (!a || !b) return;
+  activeCalls.set(a, b);
+  activeCalls.set(b, a);
+};
+
+const deregisterCall = (a: string, b: string): void => {
+  if (activeCalls.get(a) === b) activeCalls.delete(a);
+  if (activeCalls.get(b) === a) activeCalls.delete(b);
+};
+
+const deregisterUserCalls = (userId: string): string[] => {
+  const peers: string[] = [];
+  const peerId = activeCalls.get(userId);
+  if (peerId) {
+    peers.push(peerId);
+    deregisterCall(userId, peerId);
+  }
+  return peers;
+};
+
 const mountJoinChatEvent = (socket: Socket): void => {
   socket.on(ChatEventEnum.JOIN_CHAT_EVENT, (chatId: string) => {
     console.log(`User joined the chat 🤝. chatId: `, chatId);
@@ -24,8 +52,10 @@ const mountJoinChatEvent = (socket: Socket): void => {
  * This function is responsible to emit the typing event to the other participants of the chat
  */
 const mountParticipantTypingEvent = (socket: Socket): void => {
-  socket.on(ChatEventEnum.TYPING_EVENT, (chatId: string) => {
-    socket.in(chatId).emit(ChatEventEnum.TYPING_EVENT, chatId);
+  socket.on(ChatEventEnum.TYPING_EVENT, (payload) => {
+    const chatId = typeof payload === "string" ? payload : payload?.chatId;
+    if (!chatId) return;
+    socket.in(chatId).emit(ChatEventEnum.TYPING_EVENT, payload);
   });
 };
 
@@ -33,8 +63,29 @@ const mountParticipantTypingEvent = (socket: Socket): void => {
  * This function is responsible to emit the stopped typing event to the other participants of the chat
  */
 const mountParticipantStoppedTypingEvent = (socket: Socket): void => {
-  socket.on(ChatEventEnum.STOP_TYPING_EVENT, (chatId: string) => {
-    socket.in(chatId).emit(ChatEventEnum.STOP_TYPING_EVENT, chatId);
+  socket.on(ChatEventEnum.STOP_TYPING_EVENT, (payload) => {
+    const chatId = typeof payload === "string" ? payload : payload?.chatId;
+    if (!chatId) return;
+    socket.in(chatId).emit(ChatEventEnum.STOP_TYPING_EVENT, payload);
+  });
+};
+
+const mountWhiteboardUpdateEvent = (socket: Socket): void => {
+  socket.on(
+    ChatEventEnum.WHITEBOARD_UPDATE_EVENT,
+    (data: { chatId: string; elements: any[]; appState: any }) => {
+      console.log("Whiteboard update received:", data.chatId);
+      socket.in(data.chatId).emit("whiteboardUpdate", {
+        elements: data.elements,
+        appState: data.appState,
+      });
+    },
+  );
+};
+
+const mountWhiteboardClearEvent = (socket: Socket): void => {
+  socket.on(ChatEventEnum.WHITEBOARD_CLEAR_EVENT, (chatId: string) => {
+    socket.in(chatId).emit(ChatEventEnum.WHITEBOARD_CLEAR_EVENT, chatId);
   });
 };
 
@@ -42,7 +93,10 @@ const mountParticipantStoppedTypingEvent = (socket: Socket): void => {
  * Initialize socket server
  */
 const initializeSocketIO = (io: Server) => {
+  console.log("io: ", io);
   return io.on("connection", async (rawSocket: Socket) => {
+    console.log("io2: ", io, "\n rawSoc: ", rawSocket);
+
     const socket = rawSocket as SocketWithUser;
     try {
       // parse the cookies from the handshake headers (This is only possible if client has `withCredentials: true`)
@@ -70,7 +124,7 @@ const initializeSocketIO = (io: Server) => {
       ) as { _id: string };
 
       const user = await User.findById(decodedToken?._id).select(
-        "-password -refreshToken -emailVerificationToken -emailVerificationExpiry",
+        "-password -refreshToken",
       );
 
       // retrieve the user
@@ -90,22 +144,45 @@ const initializeSocketIO = (io: Server) => {
       mountJoinChatEvent(socket);
       mountParticipantTypingEvent(socket);
       mountParticipantStoppedTypingEvent(socket);
+      mountWhiteboardUpdateEvent(socket);
+      mountWhiteboardClearEvent(socket);
 
       //p2p call events
       socket.on("call-user", (data) => {
-        const { to, offer } = data;
+        const { to, offer, callType } = data;
+        const senderId = socket.user?._id?.toString();
+        if (senderId) registerCall(senderId, to);
         socket.to(to).emit("incomming-call", {
           from: socket.user?._id,
+          fromUser: {
+            _id: socket.user?._id,
+            username: socket.user?.username,
+            avatar: socket.user?.avatar,
+          },
           offer,
+          callType,
         });
       });
 
       socket.on("call-accepted", (data) => {
         const { to, answer } = data;
+        const senderId = socket.user?._id?.toString();
+        if (senderId) registerCall(senderId, to);
         socket.to(to).emit("call-accepted", {
           from: socket.user?._id,
           answer,
         });
+      });
+
+      socket.on("call-rejected", (data) => {
+        const { to } = data;
+        const senderId = socket.user?._id?.toString();
+        socket.to(to).emit("call-rejected", {
+          from: socket.user?._id,
+        });
+        if (senderId) {
+          deregisterCall(senderId, to);
+        }
       });
 
       socket.on("peer-nego-needed", (data) => {
@@ -134,15 +211,59 @@ const initializeSocketIO = (io: Server) => {
 
       socket.on("call-ended", (data) => {
         const { to } = data;
+        const senderId = socket.user?._id?.toString();
         socket.to(to).emit("call-ended", {
           from: socket.user?._id,
+        });
+        if (senderId) {
+          deregisterCall(senderId, to);
+        }
+      });
+
+      // Group call events
+      socket.on("group-call-invite", (data) => {
+        const { roomId, callType, from, participants } = data;
+        participants.forEach((participantId: string) => {
+          socket.to(participantId).emit("group-call-invitation", {
+            roomId,
+            callType,
+            from: socket.user?._id,
+          });
+        });
+      });
+
+      socket.on("group-call-accepted", (data) => {
+        const { roomId, participantId } = data;
+        socket.to(roomId).emit("group-call-participant-joined", {
+          participantId: socket.user?._id,
+        });
+      });
+
+      socket.on("group-call-rejected", (data) => {
+        const { roomId, participantId } = data;
+        socket.to(roomId).emit("group-call-participant-rejected", {
+          participantId,
+        });
+      });
+
+      socket.on("group-call-ended", (data) => {
+        const { roomId } = data;
+        socket.to(roomId).emit("group-call-ended", {
+          endedBy: socket.user?._id,
         });
       });
 
       socket.on(ChatEventEnum.DISCONNECT_EVENT, () => {
         console.log("user has disconnected 🚫. userId: " + socket.user?._id);
         if (socket.user?._id) {
-          socket.leave(socket.user._id.toString());
+          const userId = socket.user._id.toString();
+          // If the user was in an active call, forcefully notify the peer so
+          // their UI doesn't get stuck on the call screen.
+          const peers = deregisterUserCalls(userId);
+          peers.forEach((peerId) => {
+            io.to(peerId).emit("call-ended", { from: userId });
+          });
+          socket.leave(userId);
         }
       });
     } catch (error: unknown) {

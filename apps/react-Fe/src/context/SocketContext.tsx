@@ -6,7 +6,7 @@ import { useAuth } from "./AuthContext";
 // Function to establish a socket connection with authorization token
 const getSocket = (token?: string | null) => {
   const authToken = token ?? LocalStorage.get("token");
-  // FIX: Modified AI CODE STARTS HERE
+  // TEST: Modified AI CODE STARTS HERE
   const socketURI = import.meta.env.VITE_SOCKET_URI;
   console.log("Initializing socket...", {
     uri: socketURI,
@@ -16,7 +16,7 @@ const getSocket = (token?: string | null) => {
     console.error("Socket URI is missing in environment variables!");
   }
   return socketio(socketURI, {
-    // FIX: ENDS HERE
+    // TEST: ENDS HERE
     withCredentials: true,
     auth: { token: authToken },
   });
@@ -49,9 +49,27 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => {
       try {
         newSocket.disconnect();
-      } catch (_) {}
+      } catch {
+        // Ignore errors while disconnecting a stale socket
+      }
     };
   }, [token]);
+
+  // If the socket is rejected because of an invalid/expired token, log the user
+  // out and redirect to the login page (same behavior as the API interceptor).
+  useEffect(() => {
+    if (!socket) return;
+    const handleSocketError = () => {
+      LocalStorage.clear();
+      if (typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+    };
+    socket.on("socketError", handleSocketError);
+    return () => {
+      socket.off("socketError", handleSocketError);
+    };
+  }, [socket]);
 
   return (
     // Provide the socket instance through context to its children

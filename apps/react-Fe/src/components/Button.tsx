@@ -13,14 +13,14 @@ const Button: React.FC<
       <button
         {...props}
         className={classNames(
-          "rounded-full inline-flex flex-shrink-0 justify-center items-center text-center text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white shadow-sm",
+          "border-[3px] border-ink shadow-[4px_4px_0_0_var(--color-ink)] transition-all duration-150 inline-flex shrink-0 justify-center items-center text-center font-extrabold uppercase tracking-wide text-ink select-none hover:translate-x-[1px] hover:translate-y-[1px] hover:shadow-[3px_3px_0_0_var(--color-ink)] active:translate-x-[4px] active:translate-y-[4px] active:shadow-none disabled:cursor-not-allowed disabled:opacity-50",
           fullWidth ? "w-full" : "",
           severity === "secondary"
-            ? "bg-secondary hover:bg-secondary/80 disabled:bg-secondary/50 outline outline-[1px] outline-zinc-400"
+            ? "bg-cream hover:bg-retro-red hover:text-paper"
             : severity === "danger"
-            ? "bg-danger hover:bg-danger/80 disabled:bg-danger/50"
-            : "bg-primary hover:bg-primary/80 disabled:bg-primary/50",
-          size === "small" ? "text-sm px-3 py-1.5" : "text-base px-4 py-3",
+              ? "bg-retro-red hover:bg-retro-red/90 text-paper"
+              : "bg-retro-yellow hover:bg-retro-green",
+          size === "small" ? "text-sm px-3 py-2" : "text-base px-5 py-3",
           props.className || ""
         )}
       >

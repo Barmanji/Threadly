@@ -11,6 +11,7 @@ import passport from "passport";
 import { ApiError } from "./utils/ApiError.js";
 import morganMiddleware from "./logger/morgor.logger.js";
 import { initializeSocketIO } from "./socket/socket.js";
+import { setupMediasoup } from "./socket/mediasoup.js";
 import swaggerUi from "swagger-ui-express";
 import swaggerDocument from "../swagger-output.json";
 dotenv.config({ path: "./.env" });
@@ -82,6 +83,7 @@ app.use(passport.session()); // persistent login sessions
 
 app.use(morganMiddleware);
 initializeSocketIO(io);
+setupMediasoup(io);
 
 // route imports
 import userRouter from "./routes/user.routes.js";

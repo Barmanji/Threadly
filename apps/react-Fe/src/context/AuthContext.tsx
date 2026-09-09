@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { loginUser, logoutUser, registerUser } from "../api";
 import Loader from "../components/Loader";
 import type { UserInterface } from "../interfaces/user";
@@ -42,13 +43,17 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             setIsLoading,
             (res) => {
                 const { data } = res;
+                console.log("data: \n", data)
                 setUser(data.findUser);
                 setToken(data.accessToken);
                 LocalStorage.set("user", data.findUser);
                 LocalStorage.set("token", data.accessToken);
+                if (data.refreshToken) {
+                    LocalStorage.set("refreshToken", data.refreshToken);
+                }
                 navigate("/chat");
             },
-            alert,
+            (err) => toast.error(err),
         );
     };
 
@@ -62,10 +67,10 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
             async () => await registerUser(data),
             setIsLoading,
             () => {
-                alert("Account created successfully! Go ahead and login.");
+                toast.success("Account created successfully! Go ahead and login.");
                 navigate("/login");
             },
-            alert,
+            (err) => toast.error(err),
         );
     };
 
@@ -79,7 +84,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
                 LocalStorage.clear();
                 navigate("/login");
             },
-            alert,
+            (err) => toast.error(err),
         );
     };
 

@@ -1,4 +1,4 @@
-export const DB_NAME = 'chatApp-Oliver-monorepo';
+export const DB_NAME = "chatApp-Oliver-monorepo";
 
 export const ChatEventEnum = Object.freeze({
   // ? once user is ready to go
@@ -23,5 +23,8 @@ export const ChatEventEnum = Object.freeze({
   TYPING_EVENT: "typing",
   // ? when message is deleted
   MESSAGE_DELETE_EVENT: "messageDeleted",
+  // ? when whiteboard is updated
+  WHITEBOARD_UPDATE_EVENT: "whiteboardUpdate",
+  // ? when whiteboard is cleared
+  WHITEBOARD_CLEAR_EVENT: "whiteboardClear",
 });
-

@@ -1,11 +1,16 @@
 import { LockClosedIcon } from "@heroicons/react/20/solid";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Button from "../components/Button";
 import Input from "../components/Input";
 import { useAuth } from "../context/AuthContext";
 
 const Register = () => {
-    const [data, setData] = useState({
+    const [data, setData] = useState<{
+        email: string;
+        username: string;
+        password: string;
+        avatar: File | null;
+    }>({
         email: "",
         username: "",
         password: "",
@@ -27,19 +32,19 @@ const Register = () => {
                 [name]: value,
             });
         };
-    useEffect(() => {
-    }, [data]);
 
     // Handle user registration
     const handleRegister = async () => await register(data);
 
     return (
         // Register form UI
-        <div className="flex justify-center items-center flex-col h-screen w-screen">
-            <h1 className="text-3xl font-bold">FreeAPI Chat App</h1>
-            <div className="max-w-5xl w-1/2 p-8 flex justify-center items-center gap-5 flex-col bg-dark shadow-md rounded-2xl my-16 border-secondary border-[1px]">
-                <h1 className="inline-flex items-center text-2xl mb-4 flex-col">
-                    <LockClosedIcon className="h-8 w-8 mb-2" /> Register
+        <div className="flex h-screen w-screen flex-col items-center justify-center bg-cream">
+            <h1 className="neo rotate-[2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
+                FreeAPI Chat App
+            </h1>
+            <div className="neo my-10 flex w-1/2 max-w-5xl flex-col items-center justify-center gap-5 bg-retro-orange p-8">
+                <h1 className="neo-sm flex flex-col items-center bg-cream px-6 py-2 text-2xl">
+                    <LockClosedIcon className="mb-2 h-8 w-8" /> Register
                 </h1>
                 <Input
                     placeholder="Enter the email..."
@@ -91,9 +96,12 @@ const Register = () => {
                 >
                     Register
                 </Button>
-                <small className="text-zinc-300">
+                <small className="font-bold text-ink">
                     Already have an account?{" "}
-                    <a className="text-primary hover:underline" href="/login">
+                    <a
+                        className="neo-sm bg-retro-yellow px-1 font-extrabold uppercase tracking-wide hover:bg-cream"
+                        href="/login"
+                    >
                         Login
                     </a>
                 </small>

@@ -7,55 +7,51 @@ import PrivateRoute from "./components/PrivateRoute";
 import PublicRoute from "./components/PublicRoute";
 
 const App = () => {
-    const { token, user } = useAuth();
+  const { token, user } = useAuth();
 
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={
+          token && user?._id ? (
+            <Navigate to="/chat" />
+          ) : (
+            <Navigate to="/login" />
+          )
+        }
+      ></Route>
 
-    return (
-        <Routes>
-            <Route
-                path="/"
-                element={
-                    token && user?._id ? (
-                        <Navigate to="/chat" />
-                    ) : (
-                        <Navigate to="/login" />
-                    )
-                }
-            ></Route>
+      {/* Private chat route: Can only be accessed by authenticated users */}
+      <Route
+        path="/chat"
+        element={
+          <PrivateRoute>
+            <ChatPage />
+          </PrivateRoute>
+        }
+      />
 
-            {/* Private chat route: Can only be accessed by authenticated users */}
-            <Route
-                path="/chat"
-                element={
-                    <PrivateRoute>
-                        <ChatPage />
-                    </PrivateRoute>
-                }
-            />
+      {/* Public login route: Accessible by everyone */}
+      <Route
+        path="/login"
+        element={
+          <PublicRoute>
+            <Login />
+          </PublicRoute>
+        }
+      />
 
-            {/* Public login route: Accessible by everyone */}
-            <Route
-                path="/login"
-                element={
-                    <PublicRoute>
-                        <Login />
-                    </PublicRoute>
-                }
-            />
-
-            {/* Public register route: Accessible by everyone */}
-            <Route
-                path="/register"
-                element={
-                    <PublicRoute>
-                        <Register />
-                    </PublicRoute>
-                }
-            />
-
-            {/* Wildcard route for undefined paths. Shows a 404 error */}
-            <Route path="*" element={<p>404 Not found</p>} />
-        </Routes>
-    );
+      {/* Public register route: Accessible by everyone */}
+      <Route
+        path="/register"
+        element={
+          <PublicRoute>
+            <Register />
+          </PublicRoute>
+        }
+      />
+    </Routes>
+  );
 };
 export default App;
