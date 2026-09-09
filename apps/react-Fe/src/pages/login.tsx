@@ -25,11 +25,13 @@ const Login = () => {
     const handleLogin = async () => await login(data);
 
     return (
-        <div className="flex justify-center items-center flex-col h-screen w-screen">
-            <h1 className="text-3xl font-bold">FreeAPI Chat App</h1>
-            <div className="max-w-5xl w-1/2 p-8 flex justify-center items-center gap-5 flex-col bg-dark shadow-md rounded-2xl my-16 border-secondary border-[1px]">
-                <h1 className="inline-flex items-center text-2xl mb-4 flex-col">
-                    <LockClosedIcon className="h-8 w-8 mb-2" /> Login
+        <div className="flex h-screen w-screen flex-col items-center justify-center bg-cream">
+            <h1 className="neo rotate-[-2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
+                FreeAPI Chat App
+            </h1>
+            <div className="neo my-10 flex w-1/2 max-w-5xl flex-col items-center justify-center gap-5 bg-retro-orange p-8">
+                <h1 className="neo-sm flex flex-col items-center bg-cream px-6 py-2 text-2xl">
+                    <LockClosedIcon className="mb-2 h-8 w-8" /> Login
                 </h1>
                 <Input
                     placeholder="Enter the username..."
@@ -54,10 +56,10 @@ const Login = () => {
                 >
                     Login
                 </Button>
-                <small className="text-zinc-300">
+                <small className="font-bold text-ink">
                     Don&apos;t have an account?{" "}
                     <a
-                        className="text-primary hover:underline"
+                        className="neo-sm bg-retro-yellow px-1 font-extrabold uppercase tracking-wide hover:bg-cream"
                         href="/register"
                     >
                         Register
