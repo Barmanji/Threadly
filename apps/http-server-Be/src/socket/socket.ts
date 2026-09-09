@@ -222,27 +222,58 @@ const initializeSocketIO = (io: Server) => {
 
       // Group call events
       socket.on("group-call-invite", (data) => {
-        const { roomId, callType, from, participants } = data;
-        participants.forEach((participantId: string) => {
+        const { roomId, callType, participants } = data;
+        // Broadcast the invitation to the whole chat room so EVERY member gets
+        // notified (per-user targeting can silently miss peers). The sender is
+        // excluded automatically by `socket.to(...)`.
+        socket.to(roomId).emit("group-call-invitation", {
+          roomId,
+          callType,
+          from: socket.user?._id,
+          fromUser: {
+            _id: socket.user?._id,
+            username: socket.user?.username,
+            avatar: socket.user?.avatar,
+          },
+        });
+        // Keep the targeted emit as a fallback for members who left the chat
+        // room but are reachable via their own user id room.
+        (participants as string[]).forEach((participantId: string) => {
+          if (participantId === socket.user?._id?.toString()) return;
           socket.to(participantId).emit("group-call-invitation", {
             roomId,
             callType,
             from: socket.user?._id,
+            fromUser: {
+              _id: socket.user?._id,
+              username: socket.user?.username,
+              avatar: socket.user?.avatar,
+            },
           });
         });
       });
 
       socket.on("group-call-accepted", (data) => {
-        const { roomId, participantId } = data;
+        const { roomId } = data;
         socket.to(roomId).emit("group-call-participant-joined", {
           participantId: socket.user?._id,
         });
       });
 
       socket.on("group-call-rejected", (data) => {
-        const { roomId, participantId } = data;
+        const { roomId } = data;
         socket.to(roomId).emit("group-call-participant-rejected", {
-          participantId,
+          participantId: socket.user?._id,
+        });
+      });
+
+      socket.on("group-call-media-state", (data) => {
+        const { roomId, video, audio } = data;
+        if (!roomId) return;
+        socket.to(roomId).emit("group-call-media-state-update", {
+          peerId: socket.user?._id,
+          video,
+          audio,
         });
       });
 
@@ -250,6 +281,31 @@ const initializeSocketIO = (io: Server) => {
         const { roomId } = data;
         socket.to(roomId).emit("group-call-ended", {
           endedBy: socket.user?._id,
+        });
+      });
+
+      // The initiator cancelled/left the call before (or even after) people
+      // joined — dismiss any pending incoming-call popups and make everyone
+      // who did join tear down their session so nobody is left in a void call.
+      socket.on("group-call-cancelled", (data) => {
+        const { roomId, participants } = data;
+        if (!roomId) return;
+        const payload = {
+          roomId,
+          cancelledBy: socket.user?._id,
+          fromUser: {
+            _id: socket.user?._id,
+            username: socket.user?.username,
+            avatar: socket.user?.avatar,
+          },
+        };
+        socket.to(roomId).emit("group-call-cancelled", payload);
+        // Mirror the invite: people who are NOT in the chat socket room
+        // (e.g. they got the invite while on another page) must also be
+        // reached via their own user-id room.
+        (participants as string[]).forEach((participantId: string) => {
+          if (participantId === socket.user?._id?.toString()) return;
+          socket.to(participantId).emit("group-call-cancelled", payload);
         });
       });
 
