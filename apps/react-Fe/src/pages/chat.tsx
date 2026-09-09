@@ -1,8 +1,10 @@
 import {
+  DocumentIcon,
+  EllipsisVerticalIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
   PlusIcon,
-  XCircleIcon,
+  XMarkIcon,
   VideoCameraIcon,
   PhoneIcon,
 } from "@heroicons/react/20/solid";
@@ -22,6 +24,7 @@ import Input from "../components/Input";
 import { useAuth } from "../context/AuthContext";
 import { useSocket } from "../context/SocketContext";
 import { useWebRTC } from "../context/WebRTCContext";
+import { useGroupCall } from "../context/GroupCallContext";
 import CallModal from "../components/call/CallModal";
 import IncomingCallModal from "../components/call/IncomingCallModal";
 import GroupCallModal from "../components/call/GroupCallModal";
@@ -34,6 +37,7 @@ import {
   LocalStorage,
   classNames,
   getChatObjectMetadata,
+  getFileKind,
   requestHandler,
 } from "../utils";
 
@@ -58,6 +62,7 @@ const ChatPage = () => {
   const { user, logout } = useAuth();
   const { socket } = useSocket();
   const { startCall } = useWebRTC();
+  const { startGroupCall } = useGroupCall();
   // Create a reference using 'useRef' to hold the currently selected chat.
   // 'useRef' is used here because it ensures that the 'currentChat' value within socket event callbacks
   // will always refer to the latest value, even if the component re-renders.
@@ -191,42 +196,70 @@ const ChatPage = () => {
   // Function to send a chat message
   const sendChatMessage = async () => {
     // If no current chat ID exists or there's no socket connection, exit the function
-    if (!currentChat.current?._id || !socket) return;
+    if (!currentChat.current?._id || !socket || !isConnected) return;
+
+    const chatId = currentChat.current?._id;
+    const rawMessage = message;
+    const rawFiles = attachedFiles;
+    if (!rawMessage.trim() && rawFiles.length === 0) return;
 
     // Emit a STOP_TYPING_EVENT to inform other users/participants that typing has stopped
     socket.emit(STOP_TYPING_EVENT, {
-      chatId: currentChat.current?._id,
+      chatId,
       sender: { _id: user?._id, username: user?.username },
     });
 
-    // NOTE: debugging
-    console.log("Socket status:", { socket: !!socket, isConnected });
-    if (!currentChat.current?._id || !socket || !isConnected) {
-      console.log("Cannot send message - missing requirements");
-      return;
-    }
-    console.log("Sending message via socket...");
-    // rest of your code
+    // Optimistically show a WhatsApp-style pending bubble so the user knows the
+    // message is in transit and can keep typing/sending.
+    const tempId = `temp-${Date.now()}`;
+    const pendingMessage: ChatMessageInterface = {
+      _id: tempId,
+      sender: {
+        _id: user?._id || "",
+        avatar: user?.avatar || "",
+        email: user?.email || "",
+        username: user?.username || "",
+      },
+      content: rawMessage,
+      chat: chatId,
+      sending: true,
+      attachments: rawFiles.map((file, i) => ({
+        url: URL.createObjectURL(file),
+        mimetype: file.type,
+        fileName: file.name,
+        size: file.size,
+        _id: `${tempId}-${i}`,
+      })),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [pendingMessage, ...prev]);
+    setMessage("");
+    setAttachedFiles([]);
+
     // Use the requestHandler to send the message and handle potential response or error
     await requestHandler(
       // Try to send the chat message with the given message and attached files
-      async () =>
-        await sendMessage(
-          currentChat.current?._id || "", // Chat ID or empty string if not available
-          message, // Actual text message
-          attachedFiles, // Any attached files
-        ),
+      async () => await sendMessage(chatId, rawMessage, rawFiles),
       null,
-      // On successful message sending, clear the message input and attached files, then update the UI
+      // On successful message sending, replace the pending bubble with the real message
       (res) => {
-        setMessage(""); // Clear the message input
-        setAttachedFiles([]); // Clear the list of attached files
-        setMessages((prev) => [res.data, ...prev]); // Update messages in the UI
-        updateChatLastMessage(currentChat.current?._id || "", res.data); // Update the last message in the chat
+        setMessages((prev) => [
+          res.data,
+          ...prev.filter((m) => m._id !== tempId),
+        ]);
+        updateChatLastMessage(chatId, res.data);
       },
 
-      // If there's an error during the message sending process, raise an alert
-      (err) => toast.error(err),
+      // If there's an error during the message sending process, remove the
+      // pending bubble, restore the input, and raise an alert
+      (err) => {
+        setMessages((prev) => prev.filter((m) => m._id !== tempId));
+        setMessage(rawMessage);
+        setAttachedFiles(rawFiles);
+        toast.error(err);
+      },
     );
   };
 
@@ -611,6 +644,35 @@ const ChatPage = () => {
     return "multiple people are typing";
   };
 
+  // Resizable sidebar: width in px (defaults to ~1/3 of the viewport).
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
+    typeof window !== "undefined" ? Math.round(window.innerWidth / 3) : 420,
+  );
+
+  // Handles the drag-to-resize gesture on the sidebar handle.
+  const onSidebarDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (moveEvent: MouseEvent) => {
+      const next = Math.min(
+        Math.max(startWidth + (moveEvent.clientX - startX), 240),
+        window.innerWidth - 480,
+      );
+      setSidebarWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
   return (
     <>
       <AddChatModal
@@ -624,7 +686,10 @@ const ChatPage = () => {
       />
 
       <div className="w-full justify-between items-stretch h-screen flex flex-shrink-0 bg-cream overflow-hidden">
-        <div className="w-1/3 relative overflow-y-auto">
+        <div
+          className="relative overflow-y-auto flex-shrink-0 bg-cream"
+          style={{ width: sidebarWidth }}
+        >
           <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink p-4 flex flex-col justify-between items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
             <div className="flex items-center justify-between gap-2 sm:justify-start">
               <button
@@ -706,7 +771,17 @@ const ChatPage = () => {
             )}
           </div>
         </div>
-        <div className="w-2/3 border-l-4 border-ink flex flex-col min-h-0">
+        {/* Drag handle to resize the sidebar — ink divider only, with a small centered grip */}
+        <div
+          onMouseDown={onSidebarDragStart}
+          title="Drag to resize"
+          className="relative z-30 w-1 flex-shrink-0 cursor-col-resize border-l-4 border-ink bg-cream"
+        >
+          <span className="pointer-events-none absolute top-1/2 flex h-7 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm border-2 border-ink bg-paper">
+            <EllipsisVerticalIcon className="h-4 w-3.5 text-ink" />
+          </span>
+        </div>
+        <div className="flex-1 flex flex-col min-h-0">
           {currentChat.current && currentChat.current?._id ? (
             <>
               <div className="p-4 bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
@@ -760,7 +835,14 @@ const ChatPage = () => {
                       <>
                         <button
                           onClick={() => {
-                            toast.info("Group calling is work in progress");
+                            const roomId = currentChat.current?._id;
+                            const invitees =
+                              currentChat.current?.participants.map(
+                                (p) => p._id,
+                              ) ?? [];
+                            if (!roomId) return;
+                            startGroupCall(roomId, "audio", invitees);
+                            toast.info("Starting group audio call...");
                           }}
                           className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
                         >
@@ -768,7 +850,14 @@ const ChatPage = () => {
                         </button>
                         <button
                           onClick={() => {
-                            toast.info("Group calling is work in progress");
+                            const roomId = currentChat.current?._id;
+                            const invitees =
+                              currentChat.current?.participants.map(
+                                (p) => p._id,
+                              ) ?? [];
+                            if (!roomId) return;
+                            startGroupCall(roomId, "video", invitees);
+                            toast.info("Starting group video call...");
                           }}
                           className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
                         >
@@ -857,30 +946,48 @@ const ChatPage = () => {
                 ) : null}
               </div>
               {attachedFiles.length > 0 ? (
-                <div className="grid gap-4 grid-cols-5 p-4 justify-start max-w-fit flex-shrink-0">
+                <div className="grid grid-cols-5 gap-5 p-4 justify-start max-w-fit flex-shrink-0">
                   {attachedFiles.map((file, i) => {
+                    const kind = getFileKind(file.name, file.type);
+                    const previewUrl = URL.createObjectURL(file);
                     return (
                       <div
-                        key={i}
-                        className="group w-32 h-32 relative aspect-square rounded-xl cursor-pointer"
+                        key={`${file.name}-${file.lastModified}-${i}`}
+                        className="group w-32 h-32 relative overflow-hidden border-2 border-ink"
                       >
-                        <div className="absolute inset-0 flex justify-center items-center w-full h-full bg-black/40 group-hover:opacity-100 opacity-0 transition-opacity ease-in-out duration-150">
-                          <button
-                            onClick={() => {
-                              setAttachedFiles(
-                                attachedFiles.filter((_, ind) => ind !== i),
-                              );
-                            }}
-                            className="absolute -top-2 -right-2"
-                          >
-                            <XCircleIcon className="h-6 w-6 text-white" />
-                          </button>
-                        </div>
-                        <img
-                          className="h-full rounded-xl w-full object-cover"
-                          src={URL.createObjectURL(file)}
-                          alt="attachment"
-                        />
+                        <button
+                          onClick={() => {
+                            setAttachedFiles(
+                              attachedFiles.filter((_, ind) => ind !== i),
+                            );
+                          }}
+                          aria-label="Remove attachment"
+                          className="absolute top-1 right-1 z-10 flex h-6 w-6 items-center justify-center border-2 border-ink bg-black text-white"
+                        >
+                          <XMarkIcon className="h-4 w-4" />
+                        </button>
+                        {kind === "image" ? (
+                          <img
+                            className="h-full w-full object-cover"
+                            src={previewUrl}
+                            alt="attachment"
+                          />
+                        ) : kind === "video" ? (
+                          <video
+                            controls
+                            playsInline
+                            preload="metadata"
+                            src={previewUrl}
+                            className="h-full w-full object-contain bg-black"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-retro-yellow p-1">
+                            <DocumentIcon className="h-8 w-8 text-ink" />
+                            <p className="w-full truncate text-center text-[10px] font-bold text-ink">
+                              {file.name}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -891,13 +998,16 @@ const ChatPage = () => {
                   hidden
                   id="attachments"
                   type="file"
-                  value=""
                   multiple
-                  max={5}
                   onChange={(e) => {
                     if (e.target.files) {
-                      setAttachedFiles([...e.target.files]);
+                      const incoming = Array.from(e.target.files);
+                      setAttachedFiles((prev) => {
+                        const remaining = 5 - prev.length;
+                        return [...prev, ...incoming.slice(0, remaining)];
+                      });
                     }
+                    e.target.value = "";
                   }}
                 />
                 <label
