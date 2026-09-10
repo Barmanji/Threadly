@@ -48,6 +48,7 @@ const NEW_CHAT_EVENT = "newChat";
 const TYPING_EVENT = "typing";
 const STOP_TYPING_EVENT = "stopTyping";
 const MESSAGE_RECEIVED_EVENT = "messageReceived";
+const MSG_SOUND_URL = "/msg.mp3";
 const LEAVE_CHAT_EVENT = "leaveChat";
 const UPDATE_GROUP_NAME_EVENT = "updateGroupName";
 const MESSAGE_DELETE_EVENT = "messageDeleted";
@@ -61,7 +62,7 @@ const ChatPage = () => {
   // Import the 'useAuth' and 'useSocket' hooks from their respective contexts
   const { user, logout } = useAuth();
   const { socket } = useSocket();
-  const { startCall } = useWebRTC();
+  const { startCall, incomingCall, isCallActive } = useWebRTC();
   const { startGroupCall } = useGroupCall();
   // Create a reference using 'useRef' to hold the currently selected chat.
   // 'useRef' is used here because it ensures that the 'currentChat' value within socket event callbacks
@@ -76,6 +77,10 @@ const ChatPage = () => {
   const typingUserTimeoutsRef = useRef<
     Record<string, NodeJS.Timeout | undefined>
   >({});
+
+  // Store the remote peer's userId once a call starts, so callChatId stays
+  // stable even if the user navigates to a different chat during the call.
+  const callPeerIdRef = useRef<string | null>(null);
 
   // Define state variables and their initial values using 'useState'
   const [isConnected, setIsConnected] = useState(false); // For tracking socket connection
@@ -424,10 +429,16 @@ const ChatPage = () => {
    * Handles the event when a new message is received.
    */
   const onMessageReceived = (message: ChatMessageInterface) => {
-    // FIX: Debugging --------------------------
-    console.log("📨 Socket message received:", message);
-
-    // FIX: END ---------------------------------
+    // Play notification sound for messages from others
+    if (message.sender?._id !== user?._id) {
+      try {
+        const audio = new Audio(MSG_SOUND_URL);
+        audio.volume = 0.5;
+        audio.play().catch(() => {});
+      } catch {
+        // silent fail
+      }
+    }
 
     // The sender is no longer typing since they delivered a message
     const senderId = message.sender?._id;
@@ -604,6 +615,42 @@ const ChatPage = () => {
   const currentChatMetadata = currentChat.current
     ? getChatObjectMetadata(currentChat.current, user!)
     : null;
+
+  // Find the remote user's ID from the current chat participants.
+  // Also consider incomingCall.from for when the user receives a call while
+  // viewing a different chat — the caller's userId is the true remote peer.
+  // Once a call starts, store the peer's userId in a ref so callChatId stays
+  // stable even if the user navigates away from the chat during the call.
+  const incomingPeerId = incomingCall?.from;
+  useEffect(() => {
+    if (incomingPeerId) callPeerIdRef.current = incomingPeerId;
+  }, [incomingPeerId]);
+  useEffect(() => {
+    if (!isCallActive && !incomingCall) callPeerIdRef.current = null;
+  }, [isCallActive, incomingCall]);
+
+  const remoteUserId =
+    callPeerIdRef.current ||
+    incomingCall?.from ||
+    currentChat.current?.participants?.find((p) => p._id !== user?._id)?._id;
+
+  // For the whiteboard, both users MUST use the exact same chatId for the
+  // socket room. The caller passes their chatId through the call signaling
+  // (incomingCall.chatId). The receiver uses that. If unavailable (e.g.
+  // outgoing call), compute from the shared chat in the chats list.
+  const callChatId = (() => {
+    // Prefer the chatId sent by the caller through signaling — guaranteed
+    // to be the correct one for both peers.
+    if (incomingCall?.chatId) return incomingCall.chatId;
+    if (!remoteUserId || !user?._id) return currentChat.current?._id;
+    const sharedChat = chats.find(
+      (c) =>
+        !c.isGroupChat &&
+        c.participants.some((p) => p._id === user!._id) &&
+        c.participants.some((p) => p._id === remoteUserId),
+    );
+    return sharedChat?._id ?? currentChat.current?._id;
+  })();
 
   // Active chat's typing users
   const activeChatTyping = currentChat.current?._id
@@ -873,7 +920,8 @@ const ChatPage = () => {
                                 (p) => p._id !== user?._id,
                               );
                             if (recipient) {
-                              startCall(recipient._id, "audio");
+                              callPeerIdRef.current = recipient._id;
+                              startCall(recipient._id, "audio", callChatId);
                               toast.info(`Calling ${recipient.username}...`);
                             }
                           }}
@@ -888,7 +936,8 @@ const ChatPage = () => {
                                 (p) => p._id !== user?._id,
                               );
                             if (recipient) {
-                              startCall(recipient._id, "video");
+                              callPeerIdRef.current = recipient._id;
+                              startCall(recipient._id, "video", callChatId);
                               toast.info(`Calling ${recipient.username}...`);
                             }
                           }}
@@ -902,12 +951,12 @@ const ChatPage = () => {
                 }
               </div>
               <CallModal
-                chatId={currentChat.current?._id}
+                chatId={callChatId}
                 remoteAvatar={currentChatMetadata?.avatar}
                 remoteName={currentChatMetadata?.title}
                 localAvatar={user?.avatar}
               />
-              <GroupCallModal chatId={currentChat.current?._id} />
+              <GroupCallModal chatId={callChatId} />
               <GroupCallNotification />
               <IncomingCallModal />
               <div className="relative w-full flex-1 min-h-0">

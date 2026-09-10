@@ -24,6 +24,12 @@ const chatSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "User",
     },
+    // Collaborative whiteboard state shared by all participants of the chat.
+    // Shape: { elements: ExcalidrawElement[], appState?: AppState }
+    whiteboard: {
+      type: Schema.Types.Mixed,
+      default: {},
+    },
   },
   { timestamps: true }
 );

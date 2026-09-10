@@ -680,6 +680,26 @@ export const GroupCallProvider: React.FC<{ children: ReactNode }> = ({
         next.set(data.peerId, { video: data.video, audio: data.audio });
         return next;
       });
+      // When a remote participant turns OFF video, the mediasoup consumer
+      // @close event may not fire reliably, leaving a stale video track in
+      // the stream. Actively remove it here so the GroupCallModal rendering
+      // logic (hasVideo = !!videoTrack && videoTrack.enabled) correctly shows
+      // the avatar. When they turn video back on, consumeProducer will add
+      // the new track via the new-producer event.
+      if (!data.video) {
+        setParticipants((prev) => {
+          const next = new Map(prev);
+          const participant = next.get(data.peerId);
+          if (participant) {
+            const vt = participant.stream.getVideoTracks()[0];
+            if (vt) {
+              participant.stream.removeTrack(vt);
+            }
+            next.set(data.peerId, { ...participant });
+          }
+          return next;
+        });
+      }
     };
     mainSocket.on("group-call-media-state-update", listener);
     return () => {

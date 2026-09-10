@@ -22,6 +22,11 @@ const httpServer = createServer(app);
 
 const io = new Server(httpServer, {
   pingTimeout: 60000,
+  // The whiteboard relays its FULL scene every couple of refreshes; a busy
+  // board quickly exceeds socket.io's 1MB default and would otherwise force an
+  // abrupt disconnect (which also kills the active WebRTC call via the
+  // disconnect handler).
+  maxHttpBufferSize: 5 * 1024 * 1024,
   cors: {
     origin: process.env.CORS_ORIGIN,
     credentials: true,

@@ -4,14 +4,15 @@ import {
   PhoneXMarkIcon,
   MicrophoneIcon,
   UserCircleIcon,
-  FaceSmileIcon,
+  PencilSquareIcon,
   ArrowsPointingInIcon,
   ArrowsPointingOutIcon,
 } from "@heroicons/react/24/solid";
 import { useGroupCall } from "../../context/GroupCallContext";
+import { useSocket } from "../../context/SocketContext";
 import { useAuth } from "../../context/AuthContext";
 import { classNames } from "../../utils";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Whiteboard from "../WhiteBoard";
 
 interface GroupCallModalProps {
@@ -50,6 +51,7 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
     localStream,
     participants,
     mediaStates,
+    roomId: groupCallRoomId,
     leaveGroupCall,
     toggleLocalVideo,
     toggleLocalAudio,
@@ -58,6 +60,46 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
 
   const [isMinimized, setIsMinimized] = useState(false);
   const [isWhiteboardVisible, setIsWhiteboardVisible] = useState(false);
+  const [whiteboardHint, setWhiteboardHint] = useState(false);
+  const { socket } = useSocket();
+
+  // Use the group call's roomId (the SFU room) for whiteboard sync — this is
+  // the one ID that ALL participants share regardless of which chat they're
+  // viewing. Fall back to the chatId prop for persistence if no group room.
+  const whiteboardChatId = groupCallRoomId ?? chatId;
+
+  // Reset whiteboard when a new call starts
+  useEffect(() => {
+    if (isInCall) setIsWhiteboardVisible(false);
+  }, [isInCall]);
+
+  // Listen for peer whiteboard open/close presence events
+  useEffect(() => {
+    if (!socket || !whiteboardChatId) return;
+    socket.emit("joinChat", whiteboardChatId);
+
+    const onOpen = () => setWhiteboardHint(true);
+    const onCancel = () => setWhiteboardHint(false);
+    socket.on("whiteboardOpen", onOpen);
+    socket.on("whiteboardOpenCancel", onCancel);
+    return () => {
+      socket.off("whiteboardOpen", onOpen);
+      socket.off("whiteboardOpenCancel", onCancel);
+    };
+  }, [socket, whiteboardChatId]);
+
+  // While whiteboard is open, announce presence periodically
+  useEffect(() => {
+    if (!isWhiteboardVisible || !socket || !whiteboardChatId) return;
+    socket.emit("whiteboardOpen", whiteboardChatId);
+    const id = setInterval(() => {
+      socket.emit("whiteboardOpen", whiteboardChatId);
+    }, 2000);
+    return () => {
+      clearInterval(id);
+      socket.emit("whiteboardOpenCancel", whiteboardChatId);
+    };
+  }, [isWhiteboardVisible, socket, whiteboardChatId]);
 
   if (!isInCall) return null;
 
@@ -186,14 +228,122 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
         </button>
       </div>
 
-      {/* Main video grid */}
+      {/* Main content — always-mounted whiteboard (hidden via CSS),
+          grid layout toggled via CSS. */}
       <div className="min-h-0 flex-1">
-        {isWhiteboardVisible ? (
-          <div className="h-full w-full overflow-hidden rounded-xl border-4 border-ink bg-paper">
-            <Whiteboard chatId={chatId} />
+        {/* Whiteboard layout — always mounted, hidden when not visible */}
+        <div
+          className="flex h-full gap-4"
+          style={{ display: isWhiteboardVisible ? "flex" : "none" }}
+        >
+          {/* Whiteboard */}
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border-4 border-ink bg-paper">
+            <Whiteboard
+              chatId={whiteboardChatId}
+              onClose={() => setIsWhiteboardVisible(false)}
+            />
           </div>
-        ) : (
-          <div className="grid h-full grid-flow-row-dense grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3">
+          {/* Participant thumbnails (compact) */}
+          <div className="flex w-48 flex-shrink-0 flex-col gap-3 overflow-y-auto rounded-xl border-4 border-ink bg-cream p-3">
+            <p className="text-center text-[10px] font-extrabold uppercase tracking-wider text-ink">
+              Participants
+            </p>
+            {/* Local */}
+            <div className="relative aspect-video overflow-hidden rounded-lg border-[3px] border-ink bg-retro-yellow">
+              {localStream &&
+              localStream.getVideoTracks().length > 0 &&
+              cameraOn ? (
+                <video
+                  autoPlay
+                  playsInline
+                  muted
+                  ref={(video) => {
+                    if (video && video.srcObject !== localStream)
+                      video.srcObject = localStream;
+                  }}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center">
+                  {user?.avatar ? (
+                    <img
+                      src={user.avatar}
+                      alt="You"
+                      className="h-10 w-10 rounded-full border-2 border-ink object-cover"
+                    />
+                  ) : (
+                    <UserCircleIcon className="h-10 w-10 text-ink" />
+                  )}
+                </div>
+              )}
+              <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-ink/70 px-2 py-0.5">
+                <p className="text-[9px] font-extrabold uppercase text-paper">
+                  You
+                </p>
+                {micOn ? (
+                  <MicrophoneIcon className="h-3 w-3 text-retro-green" />
+                ) : (
+                  <MutedMicIcon className="h-3 w-3 text-retro-red" />
+                )}
+              </div>
+            </div>
+            {/* Remote participants */}
+            {participantArray.map((participant) => {
+              const state = mediaStates.get(participant.id);
+              const videoTrack = participant.stream.getVideoTracks()[0];
+              const hasVideo = !!videoTrack && videoTrack.enabled;
+              const videoTrackId = videoTrack?.id ?? "none";
+              return (
+                <div
+                  key={participant.id}
+                  className="relative aspect-video overflow-hidden rounded-lg border-[3px] border-ink bg-retro-orange"
+                >
+                  {hasVideo ? (
+                    <video
+                      key={`${participant.id}-${videoTrackId}`}
+                      autoPlay
+                      playsInline
+                      ref={(video) => {
+                        if (video && video.srcObject !== participant.stream)
+                          video.srcObject = participant.stream;
+                      }}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      {participant.avatar ? (
+                        <img
+                          src={participant.avatar}
+                          alt={participant.username ?? "Participant"}
+                          className="h-10 w-10 rounded-full border-2 border-ink object-cover"
+                        />
+                      ) : (
+                        <UserCircleIcon className="h-10 w-10 text-ink" />
+                      )}
+                    </div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-ink/70 px-2 py-0.5">
+                    <p className="truncate text-[9px] font-extrabold uppercase text-paper">
+                      {participant.username ?? "Participant"}
+                    </p>
+                    {participant.stream.getAudioTracks().length === 0 ||
+                    state?.audio === false ? (
+                      <MutedMicIcon className="h-3 w-3 text-retro-red" />
+                    ) : (
+                      <MicrophoneIcon className="h-3 w-3 text-retro-green" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Video grid layout — hidden when whiteboard is visible */}
+        <div
+          className="grid h-full grid-flow-row-dense grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-2 xl:grid-cols-3"
+          style={{ display: isWhiteboardVisible ? "none" : "grid" }}
+        >
             {/* Local User */}
             <div className="relative aspect-video overflow-hidden rounded-xl border-4 border-ink bg-cream">
               {localStream &&
@@ -234,7 +384,6 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
               </div>
             </div>
 
-            {/* Remote participants */}
             {participantArray.length === 0 ? (
               <div className="col-span-full flex items-center justify-center">
                 <p className="neo-sm bg-cream px-6 py-3 text-sm font-extrabold uppercase tracking-wide text-ink">
@@ -245,9 +394,9 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
 
             {participantArray.map((participant) => {
               const state = mediaStates.get(participant.id);
-              const hasVideo =
-                participant.stream.getVideoTracks().length > 0 &&
-                state?.video !== false;
+              const videoTrack = participant.stream.getVideoTracks()[0];
+              const hasVideo = !!videoTrack && videoTrack.enabled;
+              const videoTrackId = videoTrack?.id ?? "none";
 
               return (
                 <div
@@ -256,23 +405,17 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
                 >
                   {hasVideo ? (
                     <video
+                      key={`${participant.id}-${videoTrackId}`}
                       autoPlay
                       playsInline
                       ref={(video) => {
-                        if (
-                          video &&
-                          video.srcObject !== participant.stream
-                        )
+                        if (video && video.srcObject !== participant.stream)
                           video.srcObject = participant.stream;
                       }}
                       className="h-full w-full object-cover"
                     />
                   ) : (
                     <>
-                      {/* No video element to carry the audio — without this,
-                          audio-only participants (and camera-off ones) are
-                          completely silent. Bind the track to a hidden audio
-                          element instead. */}
                       <audio
                         autoPlay
                         playsInline
@@ -313,7 +456,22 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
               );
             })}
           </div>
-        )}
+      </div>
+
+      {/* Always-on hidden audio tracks so participants are heard even when
+          the whiteboard is open and the video grid is hidden. */}
+      <div className="sr-only" aria-hidden="true">
+        {participantArray.map((participant) => (
+          <audio
+            key={`audio-${participant.id}`}
+            autoPlay
+            playsInline
+            ref={(el) => {
+              if (el && el.srcObject !== participant.stream)
+                el.srcObject = participant.stream;
+            }}
+          />
+        ))}
       </div>
 
       {/* Controls bar */}
@@ -361,16 +519,21 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
         </button>
 
         <button
-          onClick={() => setIsWhiteboardVisible((prev) => !prev)}
+          onClick={() => {
+            setWhiteboardHint(false);
+            setIsWhiteboardVisible((prev) => !prev);
+          }}
           className={classNames(
             "neo-sm neo-press rounded-full p-3 transition",
             isWhiteboardVisible
               ? "bg-retro-orange text-paper"
-              : "bg-paper text-ink hover:bg-retro-orange",
+              : whiteboardHint
+                ? "bg-retro-orange text-paper animate-pulse"
+                : "bg-paper text-ink hover:bg-retro-orange",
           )}
-          title="Toggle whiteboard"
+          title={whiteboardHint && !isWhiteboardVisible ? "Peer is on the whiteboard" : "Whiteboard"}
         >
-          <FaceSmileIcon className="h-6 w-6" />
+          <PencilSquareIcon className="h-6 w-6" />
         </button>
       </div>
     </div>

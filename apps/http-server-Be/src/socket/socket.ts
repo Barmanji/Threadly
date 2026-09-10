@@ -40,7 +40,8 @@ const deregisterUserCalls = (userId: string): string[] => {
 
 const mountJoinChatEvent = (socket: Socket): void => {
   socket.on(ChatEventEnum.JOIN_CHAT_EVENT, (chatId: string) => {
-    console.log(`User joined the chat 🤝. chatId: `, chatId);
+    const userId = (socket as any).user?._id?.toString();
+    console.log("[joinChat] user:", userId, "chatId:", chatId);
     // joining the room with the chatId will allow specific events to be fired where we don't bother about the users like typing events
     // E.g. When user types we don't want to emit that event to specific participant.
     // We want to just emit that to the chat where the typing is happening
@@ -74,7 +75,15 @@ const mountWhiteboardUpdateEvent = (socket: Socket): void => {
   socket.on(
     ChatEventEnum.WHITEBOARD_UPDATE_EVENT,
     (data: { chatId: string; elements: any[]; appState: any }) => {
-      console.log("Whiteboard update received:", data.chatId);
+      const senderId = (socket as any).user?._id?.toString();
+      console.log(
+        "[whiteboard-update] sender:",
+        senderId,
+        "chatId:",
+        data.chatId,
+        "elements:",
+        data.elements?.length,
+      );
       socket.in(data.chatId).emit("whiteboardUpdate", {
         elements: data.elements,
         appState: data.appState,
@@ -83,9 +92,39 @@ const mountWhiteboardUpdateEvent = (socket: Socket): void => {
   );
 };
 
+const mountWhiteboardStrokeEvent = (socket: Socket): void => {
+  socket.on(
+    ChatEventEnum.WHITEBOARD_STROKE_EVENT,
+    (data: { chatId: string; stroke: any }) => {
+      const senderId = (socket as any).user?._id?.toString();
+      console.log(
+        "[whiteboard-stroke] sender:",
+        senderId,
+        "chatId:",
+        data.chatId,
+      );
+      socket.in(data.chatId).emit("whiteboardStroke", {
+        stroke: data.stroke,
+      });
+    },
+  );
+};
+
 const mountWhiteboardClearEvent = (socket: Socket): void => {
   socket.on(ChatEventEnum.WHITEBOARD_CLEAR_EVENT, (chatId: string) => {
     socket.in(chatId).emit(ChatEventEnum.WHITEBOARD_CLEAR_EVENT, chatId);
+  });
+};
+
+const mountWhiteboardOpenEvent = (socket: Socket): void => {
+  socket.on(ChatEventEnum.WHITEBOARD_OPEN_EVENT, (chatId: string) => {
+    socket.in(chatId).emit(ChatEventEnum.WHITEBOARD_OPEN_EVENT, chatId);
+  });
+};
+
+const mountWhiteboardOpenCancelEvent = (socket: Socket): void => {
+  socket.on(ChatEventEnum.WHITEBOARD_OPEN_CANCEL_EVENT, (chatId: string) => {
+    socket.in(chatId).emit(ChatEventEnum.WHITEBOARD_OPEN_CANCEL_EVENT, chatId);
   });
 };
 
@@ -145,11 +184,14 @@ const initializeSocketIO = (io: Server) => {
       mountParticipantTypingEvent(socket);
       mountParticipantStoppedTypingEvent(socket);
       mountWhiteboardUpdateEvent(socket);
+      mountWhiteboardStrokeEvent(socket);
       mountWhiteboardClearEvent(socket);
+      mountWhiteboardOpenEvent(socket);
+      mountWhiteboardOpenCancelEvent(socket);
 
       //p2p call events
       socket.on("call-user", (data) => {
-        const { to, offer, callType } = data;
+        const { to, offer, callType, chatId } = data;
         const senderId = socket.user?._id?.toString();
         if (senderId) registerCall(senderId, to);
         socket.to(to).emit("incomming-call", {
@@ -161,6 +203,7 @@ const initializeSocketIO = (io: Server) => {
           },
           offer,
           callType,
+          chatId,
         });
       });
 
@@ -212,12 +255,22 @@ const initializeSocketIO = (io: Server) => {
       socket.on("call-ended", (data) => {
         const { to } = data;
         const senderId = socket.user?._id?.toString();
+        console.log("[call-ended] emitted by:", senderId, "to:", to);
         socket.to(to).emit("call-ended", {
           from: socket.user?._id,
         });
         if (senderId) {
           deregisterCall(senderId, to);
         }
+      });
+
+      // Relay media state (mute/video-off) between P2P call peers
+      socket.on("peer-media-state", (data: { to: string; audio?: boolean; video?: boolean }) => {
+        socket.to(data.to).emit("peer-media-state", {
+          from: socket.user?._id,
+          audio: data.audio,
+          video: data.video,
+        });
       });
 
       // Group call events
@@ -316,6 +369,12 @@ const initializeSocketIO = (io: Server) => {
           // If the user was in an active call, forcefully notify the peer so
           // their UI doesn't get stuck on the call screen.
           const peers = deregisterUserCalls(userId);
+          console.log(
+            "[disconnect] user:",
+            userId,
+            "was in active call, notifying:",
+            peers,
+          );
           peers.forEach((peerId) => {
             io.to(peerId).emit("call-ended", { from: userId });
           });

@@ -766,6 +766,81 @@ const getAllChats: RequestHandler = asyncHandler(
   },
 );
 
+/**
+ * @description Assert the logged-in user is a participant of the chat, otherwise
+ * throw. Used to keep whiteboard data private to the chat's members.
+ */
+const ensureChatParticipant = async (
+  chatId: string,
+  user: IUserWithId,
+) => {
+  const chat = await Chat.findById(chatId).select("participants");
+  if (!chat) throw new ApiError(404, "Chat does not exist");
+  const isParticipant = chat.participants.some(
+    (p: Types.ObjectId) => p.toString() === user._id.toString(),
+  );
+  if (!isParticipant) {
+    throw new ApiError(403, "You are not a participant in this chat");
+  }
+  return chat;
+};
+
+/**
+ * @description Fetch the persisted whiteboard state for a chat
+ */
+const getWhiteboard: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const chatId = req.params.chatId as string;
+    const user = req.user as IUserWithId;
+    if (!user?._id) throw new ApiError(401, "User not authenticated");
+
+    const chat = await ensureChatParticipant(chatId, user);
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { whiteboard: chat.whiteboard || {} },
+          "Whiteboard fetched successfully",
+        ),
+      );
+  },
+);
+
+/**
+ * @description Persist the whiteboard state for a chat
+ */
+const saveWhiteboard: RequestHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const chatId = req.params.chatId as string;
+    const user = req.user as IUserWithId;
+    if (!user?._id) throw new ApiError(401, "User not authenticated");
+
+    const { elements, appState } = req.body ?? {};
+    if (!Array.isArray(elements)) {
+      throw new ApiError(400, "Whiteboard elements must be an array");
+    }
+
+    const chat = await ensureChatParticipant(chatId, user);
+    chat.whiteboard = {
+      elements,
+      appState: appState ?? undefined,
+    };
+    await chat.save();
+
+    return res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { whiteboard: chat.whiteboard },
+          "Whiteboard saved successfully",
+        ),
+      );
+  },
+);
+
 export {
   addNewParticipantInGroupChat,
   createAGroupChat,
@@ -774,8 +849,10 @@ export {
   deleteOneOnOneChat,
   getAllChats,
   getGroupChatDetails,
+  getWhiteboard,
   leaveGroupChat,
   removeParticipantFromGroupChat,
   renameGroupChat,
+  saveWhiteboard,
   searchAvailableUsers,
 };

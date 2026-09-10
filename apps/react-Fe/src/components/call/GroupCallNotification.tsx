@@ -3,16 +3,19 @@ import {
   PhoneXMarkIcon,
   UserGroupIcon,
 } from "@heroicons/react/24/solid";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { useSocket } from "../../context/SocketContext";
 import { useGroupCall } from "../../context/GroupCallContext";
 import { useAuth } from "../../context/AuthContext";
 import { Button } from "../ui/button";
 
+const CALL_RING_URL = "/call.mp3";
+const AUTO_REJECT_MS = 40_000;
+
 const GroupCallNotification: React.FC = () => {
   const { socket } = useSocket();
-  const { isInCall, joinGroupCall, leaveGroupCall, roomId } = useGroupCall();
+  const { isInCall, joinGroupCall, roomId } = useGroupCall();
   const { user } = useAuth();
   const [incomingGroupCall, setIncomingGroupCall] = useState<{
     roomId: string;
@@ -20,6 +23,30 @@ const GroupCallNotification: React.FC = () => {
     from: string;
     fromUser?: { _id: string; username?: string; avatar?: string };
   } | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Play looping ring sound + auto-reject after 40s
+  useEffect(() => {
+    if (!incomingGroupCall) return;
+
+    const audio = new Audio(CALL_RING_URL);
+    audio.loop = true;
+    audio.volume = 0.7;
+    audioRef.current = audio;
+    audio.play().catch(() => {});
+
+    timerRef.current = setTimeout(() => {
+      handleReject();
+    }, AUTO_REJECT_MS);
+
+    return () => {
+      audio.pause();
+      audio.src = "";
+      audioRef.current = null;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [incomingGroupCall?.roomId]);
 
   useEffect(() => {
     if (!socket) return;
@@ -32,13 +59,15 @@ const GroupCallNotification: React.FC = () => {
         from: string;
         fromUser?: { _id: string; username?: string; avatar?: string };
       }) => {
-        setIncomingGroupCall(data);
         const callerName = data.fromUser?.username || data.from;
         if (isInCall && roomId === data.roomId) {
+          // Already in this call — just toast, do NOT set incomingGroupCall
+          // (which would trigger the ring sound and auto-reject timer).
           toast.info(`${callerName} started a call — you're already in it`);
-        } else {
-          toast.info(`${callerName} is starting a ${data.callType} call...`);
+          return;
         }
+        setIncomingGroupCall(data);
+        toast.info(`${callerName} is starting a ${data.callType} call...`);
       },
     );
 
@@ -54,11 +83,10 @@ const GroupCallNotification: React.FC = () => {
           toast.info(`${callerName} cancelled the call`);
           setIncomingGroupCall(null);
         }
-        // If we already accepted and are sitting in that call, tear it down
-        // so we're not left in a void room.
-        if (isInCall && roomId === data.roomId) {
-          leaveGroupCall();
-        }
+        // Do NOT call leaveGroupCall() here — group-call-cancelled is only
+        // emitted when the initiator leaves before anyone joins, so nobody
+        // should be in the call yet. Calling leaveGroupCall() would kick
+        // users who are already in the call from a previous invite.
       },
     );
 
@@ -66,9 +94,15 @@ const GroupCallNotification: React.FC = () => {
       socket.off("group-call-invitation");
       socket.off("group-call-cancelled");
     };
-  }, [socket, isInCall, roomId, incomingGroupCall?.roomId, leaveGroupCall]);
+  }, [socket, isInCall, roomId, incomingGroupCall?.roomId]);
 
   const handleAccept = async () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
     if (incomingGroupCall) {
       await joinGroupCall(incomingGroupCall.roomId, incomingGroupCall.callType);
       setIncomingGroupCall(null);
@@ -76,6 +110,12 @@ const GroupCallNotification: React.FC = () => {
   };
 
   const handleReject = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    if (timerRef.current) clearTimeout(timerRef.current);
     if (incomingGroupCall) {
       socket?.emit("group-call-rejected", {
         roomId: incomingGroupCall.roomId,

@@ -15,6 +15,7 @@ export interface IIncomingCall {
   from: string;
   offer: RTCSessionDescriptionInit;
   callType: "video" | "audio";
+  chatId?: string;
   fromUser?: {
     _id: string;
     username?: string;
@@ -31,10 +32,12 @@ interface IWebRTCContext {
   incomingCall: IIncomingCall | null;
   isMuted: boolean;
   isVideoEnabled: boolean;
+  remoteMuted: boolean;
+  remoteVideoOff: boolean;
   callType: "video" | "audio" | null;
   callConnectionState: CallConnectionState;
   isCallInitiator: boolean;
-  startCall: (peerId: string, callType: "video" | "audio") => void;
+  startCall: (peerId: string, callType: "video" | "audio", chatId?: string) => void;
   endCall: () => void;
   acceptIncomingCall: () => void;
   rejectIncomingCall: () => void;
@@ -60,6 +63,8 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const [incomingCall, setIncomingCall] = useState<IIncomingCall | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
+  const [remoteMuted, setRemoteMuted] = useState(false);
+  const [remoteVideoOff, setRemoteVideoOff] = useState(false);
   const [callType, setCallType] = useState<"video" | "audio" | null>(null);
   const [callConnectionState, setCallConnectionState] =
     useState<CallConnectionState>("connecting");
@@ -93,6 +98,8 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     setIncomingCall(null);
     setIsMuted(false);
     setIsVideoEnabled(true);
+    setRemoteMuted(false);
+    setRemoteVideoOff(false);
     setCallType(null);
     setCallConnectionState("connecting");
     setIsCallInitiator(false);
@@ -103,8 +110,10 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   // Schedules an automatic end-of-call once the WebRTC connection has dropped.
   // `immediate` is used when the connection is irrecoverably failed/closed;
-  // otherwise we give a short grace period so transient network blips don't
-  // kill a healthy call.
+  // otherwise we give a LONG grace period so transient network blips — or
+  // heavy main-thread load from things like the shared whiteboard stalling the
+  // ICE keepalives — don't kill a healthy call. `connectionState` flapping to
+  // "disconnected" self-heals and clears this timer the moment it recovers.
   const scheduleCallEnd = useCallback(
     (immediate: boolean) => {
       clearDisconnectTimer();
@@ -112,7 +121,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
         disconnectTimerRef.current = null;
         setCallConnectionState("disconnected");
         resetCallState();
-      }, immediate ? 400 : 3000);
+      }, immediate ? 1500 : 10000);
     },
     [clearDisconnectTimer, resetCallState],
   );
@@ -188,7 +197,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const startCall = useCallback(
-    async (peerId: string, callType: "video" | "audio") => {
+    async (peerId: string, callType: "video" | "audio", chatId?: string) => {
       const pc = createPeerConnection();
       remotePeerIdRef.current = peerId;
       setIsVideoEnabled(callType === "video");
@@ -206,7 +215,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        const sent = socket?.emit("call-user", { to: peerId, offer, callType });
+        const sent = socket?.emit("call-user", { to: peerId, offer, callType, chatId });
         if (!sent) {
           resetCallState();
           toast.error("Failed to connect. Please try again.");
@@ -279,6 +288,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const endCall = useCallback(() => {
     console.log("endCall called - remotePeerId:", remotePeerIdRef.current);
+    console.trace("endCall stack");
     if (remotePeerIdRef.current) {
       socket?.emit("call-ended", { to: remotePeerIdRef.current });
     }
@@ -287,17 +297,27 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const toggleMute = useCallback(() => {
     if (localStream) {
-      localStream.getAudioTracks().forEach((t) => (t.enabled = !t.enabled));
-      setIsMuted((prev) => !prev);
+      const next = !localStream.getAudioTracks()[0]?.enabled;
+      localStream.getAudioTracks().forEach((t) => (t.enabled = next));
+      setIsMuted(!next);
+      const peerId = remotePeerIdRef.current;
+      if (peerId && socket) {
+        socket.emit("peer-media-state", { to: peerId, audio: next });
+      }
     }
-  }, [localStream]);
+  }, [localStream, socket]);
 
   const toggleVideo = useCallback(() => {
     if (localStream) {
-      localStream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
-      setIsVideoEnabled((prev) => !prev);
+      const next = !localStream.getVideoTracks()[0]?.enabled;
+      localStream.getVideoTracks().forEach((t) => (t.enabled = next));
+      setIsVideoEnabled(next);
+      const peerId = remotePeerIdRef.current;
+      if (peerId && socket) {
+        socket.emit("peer-media-state", { to: peerId, video: next });
+      }
     }
-  }, [localStream]);
+  }, [localStream, socket]);
 
   useEffect(() => {
     if (!socket) return;
@@ -336,14 +356,36 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       resetCallState();
     });
 
+    // Track remote peer's media state (mute/video-off)
+    socket.on("peer-media-state", ({ audio, video }: { audio?: boolean; video?: boolean }) => {
+      if (audio !== undefined) setRemoteMuted(!audio);
+      if (video !== undefined) setRemoteVideoOff(!video);
+    });
+
     return () => {
       socket.off("incomming-call");
       socket.off("call-accepted");
       socket.off("ice-candidate");
       socket.off("call-ended");
       socket.off("call-rejected");
+      socket.off("peer-media-state");
     };
   }, [socket, resetCallState, processIceQueue]);
+
+  // Broadcast local media state to the remote peer when the call starts,
+  // so both sides know each other's initial mute/video state.
+  useEffect(() => {
+    if (!isCallActive || !socket) return;
+    const peerId = remotePeerIdRef.current;
+    if (!peerId) return;
+    const videoTrack = localStream?.getVideoTracks()[0];
+    const audioTrack = localStream?.getAudioTracks()[0];
+    socket.emit("peer-media-state", {
+      to: peerId,
+      video: videoTrack ? videoTrack.enabled : false,
+      audio: audioTrack ? audioTrack.enabled : false,
+    });
+  }, [isCallActive, socket, localStream]);
 
   return (
     <WebRTCContext.Provider
@@ -354,6 +396,8 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
         incomingCall,
         isMuted,
         isVideoEnabled,
+        remoteMuted,
+        remoteVideoOff,
         callType,
         callConnectionState,
         isCallInitiator,
