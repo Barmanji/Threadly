@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 
 // Detects whether a MediaStream currently carries voice activity (someone
 // talking) by sampling the waveform in the time domain. Returns a boolean that
-// flips only when the speaking state actually changes, so it's safe to drive UI.
+// only flips after the signal has been consistently above/below the threshold
+// for several consecutive frames, preventing rapid flicker.
 const useVoiceActivity = (
   stream: MediaStream | null,
   threshold = 0.02,
@@ -13,9 +14,16 @@ const useVoiceActivity = (
   const analyserRef = useRef<AnalyserNode | null>(null);
   const rafRef = useRef<number | null>(null);
 
+  // Hysteresis: require N consecutive frames in the new state before toggling.
+  const consecutiveFramesRef = useRef(0);
+  const speakingRef = useRef(false);
+  const FRAMES_REQUIRED = 5;
+
   useEffect(() => {
     if (!stream) {
       setIsSpeaking(false);
+      speakingRef.current = false;
+      consecutiveFramesRef.current = 0;
       return;
     }
 
@@ -51,7 +59,19 @@ const useVoiceActivity = (
         sum += value * value;
       }
       const rms = Math.sqrt(sum / dataArray.length);
-      setIsSpeaking(rms > threshold);
+      const rawSpeaking = rms > threshold;
+
+      if (rawSpeaking === speakingRef.current) {
+        consecutiveFramesRef.current = 0;
+      } else {
+        consecutiveFramesRef.current++;
+        if (consecutiveFramesRef.current >= FRAMES_REQUIRED) {
+          speakingRef.current = rawSpeaking;
+          setIsSpeaking(rawSpeaking);
+          consecutiveFramesRef.current = 0;
+        }
+      }
+
       rafRef.current = requestAnimationFrame(checkVolume);
     };
     checkVolume();
