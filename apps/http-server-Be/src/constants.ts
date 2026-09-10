@@ -25,6 +25,12 @@ export const ChatEventEnum = Object.freeze({
   MESSAGE_DELETE_EVENT: "messageDeleted",
   // ? when whiteboard is updated
   WHITEBOARD_UPDATE_EVENT: "whiteboardUpdate",
+  // ? when a single stroke is drawn on the whiteboard
+  WHITEBOARD_STROKE_EVENT: "whiteboardStroke",
   // ? when whiteboard is cleared
   WHITEBOARD_CLEAR_EVENT: "whiteboardClear",
+  // ? when a participant opens the whiteboard (notify others to join)
+  WHITEBOARD_OPEN_EVENT: "whiteboardOpen",
+  // ? when a participant closes the whiteboard
+  WHITEBOARD_OPEN_CANCEL_EVENT: "whiteboardOpenCancel",
 });

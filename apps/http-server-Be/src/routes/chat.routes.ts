@@ -7,9 +7,11 @@ import {
   deleteOneOnOneChat,
   getAllChats,
   getGroupChatDetails,
+  getWhiteboard,
   leaveGroupChat,
   removeParticipantFromGroupChat,
   renameGroupChat,
+  saveWhiteboard,
   searchAvailableUsers,
 } from "../controllers/chat.controller.js";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -26,6 +28,11 @@ const router: Router = express.Router();
 router.use(verifyJWT);
 
 router.route("/").get(getAllChats);
+
+router
+  .route("/whiteboard/:chatId")
+  .get(mongoIdPathVariableValidator("chatId"), validate, getWhiteboard)
+  .put(mongoIdPathVariableValidator("chatId"), validate, saveWhiteboard);
 
 router.route("/users").get(searchAvailableUsers);
 
