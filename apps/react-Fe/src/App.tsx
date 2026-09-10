@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/login";
 import Register from "./pages/register";
+import Landing from "./pages/landing";
 import ChatPage from "./pages/chat";
 import { useAuth } from "./context/AuthContext";
 import PrivateRoute from "./components/PrivateRoute";
@@ -17,7 +18,7 @@ const App = () => {
           token && user?._id ? (
             <Navigate to="/chat" />
           ) : (
-            <Navigate to="/login" />
+            <Landing />
           )
         }
       ></Route>

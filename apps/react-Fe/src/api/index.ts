@@ -224,22 +224,37 @@ const deleteMessage = (
     return apiClient.delete(`/messages/${chatId}/${messageId}`);
 };
 
+const getWhiteboard = (
+    chatId: string,
+): Promise<ApiResponse<{ whiteboard: { elements?: unknown[]; appState?: unknown } }>> => {
+    return apiClient.get(`/chats/whiteboard/${chatId}`);
+};
+
+const saveWhiteboardState = (
+    chatId: string,
+    data: { elements: unknown[]; appState?: unknown },
+): Promise<ApiResponse<{ whiteboard: { elements?: unknown[]; appState?: unknown } }>> => {
+    return apiClient.put(`/chats/whiteboard/${chatId}`, data);
+};
+
 // Export all the API functions
 export {
     addParticipantToGroup,
     createGroupChat,
     createUserChat,
     deleteGroup,
+    deleteMessage,
     deleteOneOnOneChat,
     getAvailableUsers,
     getChatMessages,
     getGroupInfo,
     getUserChats,
+    getWhiteboard,
     loginUser,
     logoutUser,
     registerUser,
     removeParticipantFromGroup,
+    saveWhiteboardState,
     sendMessage,
     updateGroupName,
-    deleteMessage,
 };
