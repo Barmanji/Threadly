@@ -1,13 +1,23 @@
 {
     "$schema": "https://turborepo.com/schema.json",
     "ui": "tui",
-    "globalEnv": ["PORT"],
+    "globalEnv": ["NODE_ENV"],
     "tasks": {
         "build": {
-            "env": ["PORT", "MY_API_KEY"],
             "dependsOn": ["^build"],
             "inputs": ["$TURBO_DEFAULT$", ".env*"],
-            "outputs": [".next/**", "!.next/cache/**"]
+            "outputs": ["dist/**"]
+        },
+        "http-server-be#build": {
+            "dependsOn": ["^build"],
+            "inputs": ["$TURBO_DEFAULT$", ".env*"],
+            "outputs": ["dist/**"]
+        },
+        "react-fe#build": {
+            "dependsOn": ["^build"],
+            "env": ["VITE_SERVER_URI", "VITE_SOCKET_URI", "VITE_MEDIASOUP_URL"],
+            "inputs": ["$TURBO_DEFAULT$", ".env*"],
+            "outputs": ["dist/**"]
         },
         "lint": {
             "dependsOn": ["^lint"]
