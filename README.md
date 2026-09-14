@@ -2,7 +2,7 @@
 
 A retro-themed real-time chat application with built-in 1:1 & group video/audio calls, collaborative whiteboard, and file sharing — solving the limitations of WhatsApp Web.
 
-> **Live Demo:** *(Soon)*
+> **Live Demo:** *(https://threadly.barmanji.com/)*
 
 ---
 
