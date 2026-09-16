@@ -120,12 +120,12 @@ const FeatureCard = ({
         feature.placeholder,
       )}
     >
-      <div
-        className="absolute inset-0 bg-cover bg-center"
-        style={{ backgroundImage: `url(${feature.image})` }}
-        role="img"
-        aria-label={`${feature.title} screenshot`}
-      />
+<div
+  className="absolute inset-0 bg-contain bg-center bg-no-repeat"
+  style={{ backgroundImage: `url(${feature.image})` }}
+  role="img"
+  aria-label={`${feature.title} screenshot`}
+/>
     </div>
   </div>
 );
@@ -175,7 +175,15 @@ export default function Landing() {
           {/* Connect with me */}
           <div className="mt-6 flex flex-col items-center gap-4">
             <p className="text-sm font-bold uppercase tracking-widest text-paper/60">
-              Connect with me
+              <a
+                href="https://barmanji.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-paper underline decoration-paper/60 decoration-2 underline-offset-4 transition-colors hover:decoration-paper"
+              >
+                Connect
+              </a>{" "}
+              with me
             </p>
             <div className="flex items-center gap-5">
               {SOCIAL_LINKS.map((link) => {
