@@ -1,7 +1,26 @@
 import { Link } from "react-router-dom";
+import { Github, Linkedin, Mail } from "lucide-react";
 import { cn } from "@/lib/utils";
 import HeroSection from "../components/landing/HeroSection";
 import { StackingCards } from "../components/landing/StackingCards";
+
+const SOCIAL_LINKS = [
+  {
+    name: "GitHub",
+    url: "https://github.com/barmanji",
+    icon: Github,
+  },
+  {
+    name: "LinkedIn",
+    url: "https://www.linkedin.com/in/ajay-barman-0b37011a7/",
+    icon: Linkedin,
+  },
+  {
+    name: "Email",
+    url: "mailto:barmanjiaj@gmail.com",
+    icon: Mail,
+  },
+];
 
 const FEATURES = [
   {
@@ -12,6 +31,7 @@ const FEATURES = [
     textColor: "text-retro-orange",
     borderColor: "border-retro-orange",
     placeholder: "bg-retro-orange/10",
+    image: "/InstantChat.png",
   },
   {
     title: "Video & Audio Calls",
@@ -21,6 +41,7 @@ const FEATURES = [
     textColor: "text-retro-blue",
     borderColor: "border-retro-blue",
     placeholder: "bg-retro-blue/10",
+    image: "/videoCall.png",
   },
   {
     title: "Group Calls",
@@ -30,6 +51,7 @@ const FEATURES = [
     textColor: "text-retro-green",
     borderColor: "border-retro-green",
     placeholder: "bg-retro-green/10",
+    image: "/GroupCall.png",
   },
   {
     title: "Collaborative Whiteboard",
@@ -39,6 +61,7 @@ const FEATURES = [
     textColor: "text-retro-yellow",
     borderColor: "border-retro-yellow",
     placeholder: "bg-retro-yellow/10",
+    image: "/WhiteBoard.png",
   },
   {
     title: "Media Sharing",
@@ -48,6 +71,7 @@ const FEATURES = [
     textColor: "text-retro-pink",
     borderColor: "border-retro-pink",
     placeholder: "bg-retro-pink/10",
+    image: "/MediaShare.png",
   },
 ];
 
@@ -89,19 +113,18 @@ const FeatureCard = ({
       <div className={cn("mt-1 h-1 w-16 border-[3px] border-ink", feature.color)} />
     </div>
 
-    {/* Image placeholder — right 60% */}
+    {/* Image — right 60% */}
     <div
       className={cn(
         "flex flex-1 items-center justify-center border-t-[3px] border-ink p-6 md:border-t-0 md:border-l-[3px] md:p-10",
         feature.placeholder,
       )}
     >
-      <div className="flex flex-col items-center gap-3 text-ink/30">
-        <div className={cn("neo-sm h-16 w-24", feature.color, "opacity-30")} />
-        <span className="text-[10px] font-bold uppercase tracking-widest">
-          Screenshot Coming Soon
-        </span>
-      </div>
+      <img
+        src={feature.image}
+        alt={`${feature.title} screenshot`}
+        className="neo-sm max-h-[70%] w-auto max-w-full object-contain"
+      />
     </div>
   </div>
 );
@@ -147,6 +170,31 @@ export default function Landing() {
           <p className="mt-4 text-sm font-bold uppercase tracking-widest text-paper/40">
             Threadly &copy; {new Date().getFullYear()}
           </p>
+
+          {/* Connect with me */}
+          <div className="mt-6 flex flex-col items-center gap-4">
+            <p className="text-sm font-bold uppercase tracking-widest text-paper/60">
+              Connect with me
+            </p>
+            <div className="flex items-center gap-5">
+              {SOCIAL_LINKS.map((link) => {
+                const isMail = link.url.startsWith("mailto:");
+                const Icon = link.icon;
+                return (
+                  <a
+                    key={link.name}
+                    href={link.url}
+                    target={isMail ? undefined : "_blank"}
+                    rel={isMail ? undefined : "noopener noreferrer"}
+                    aria-label={link.name}
+                    className="neo-sm flex h-10 w-10 items-center justify-center bg-paper text-ink transition-transform hover:-translate-y-0.5 hover:bg-retro-yellow"
+                  >
+                    <Icon className="h-5 w-5" />
+                  </a>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </footer>
     </div>
