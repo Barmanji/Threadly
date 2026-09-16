@@ -45,6 +45,36 @@ Threadly is a full-stack monorepo built with Turborepo. It provides real-time me
 | **Call Logs** | Track audio/video call history (missed, answered) |
 | **API Docs** | Swagger UI auto-generated from route definitions |
 
+### Messaging
+
+Real-time 1:1 & group chat with typing indicators and rich attachments (images, videos, PDFs).
+
+![InstantChat](apps/react-Fe/public/InstantChat.png)
+
+### 1:1 Calls
+
+WebRTC peer-to-peer audio & video calls with mute/camera toggle.
+
+![videoCall](apps/react-Fe/public/videoCall.png)
+
+### Group Calls
+
+mediasoup SFU-based group audio & video for 3+ participants.
+
+![GroupCall](apps/react-Fe/public/GroupCall.png)
+
+### Whiteboard
+
+Canvas-based collaborative whiteboard with pen, eraser, shapes, real-time sync & persistence.
+
+![WhiteBoard](apps/react-Fe/public/WhiteBoard.png)
+
+### File Sharing
+
+Upload via Multer → Cloudinary, with backend-proxied downloads (SSRF protection).
+
+![MediaShare](apps/react-Fe/public/MediaShare.png)
+
 ---
 
 ## Tech Stack
