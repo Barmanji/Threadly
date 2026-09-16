@@ -121,7 +121,7 @@ const MessageItem: React.FC<{
                         <div>
                             <div
                                 className={classNames(
-                                    "grid max-w-xl gap-3",
+                                    "grid max-w-xl gap-2",
                                     message.attachments?.length === 1
                                         ? " grid-cols-1"
                                         : "",
