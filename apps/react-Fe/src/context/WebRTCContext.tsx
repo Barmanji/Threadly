@@ -9,6 +9,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useSocket } from "./SocketContext";
+import { useAuth } from "./AuthContext";
 import { stunServers } from "../config/webrtc";
 
 export interface IIncomingCall {
@@ -56,6 +57,7 @@ export const useWebRTC = () => {
 
 export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const { socket } = useSocket();
+  const { user } = useAuth();
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -73,8 +75,23 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const remotePeerIdRef = useRef<string | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
   const iceQueue = useRef<RTCIceCandidateInit[]>([]);
   const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fresh local user id for socket handlers (avoids stale closures).
+  const currentUserIdRef = useRef<string | undefined>(user?._id);
+  useEffect(() => {
+    currentUserIdRef.current = user?._id;
+  }, [user?._id]);
+  // Fresh "are we actively calling that peer right now" for socket handlers.
+  const callActiveRef = useRef(false);
+  useEffect(() => {
+    callActiveRef.current = isCallActive;
+  }, [isCallActive]);
+  const callInitiatorRef = useRef(false);
+  useEffect(() => {
+    callInitiatorRef.current = isCallInitiator;
+  }, [isCallInitiator]);
 
   const clearDisconnectTimer = useCallback(() => {
     if (disconnectTimerRef.current) {
@@ -92,6 +109,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     if (localStream) {
       localStream.getTracks().forEach((track) => track.stop());
     }
+    localStreamRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
     setIsCallActive(false);
@@ -103,10 +121,43 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     setCallType(null);
     setCallConnectionState("connecting");
     setIsCallInitiator(false);
+    callActiveRef.current = false;
+    callInitiatorRef.current = false;
     remotePeerIdRef.current = null;
     remoteStreamRef.current = null;
     iceQueue.current = [];
   }, [localStream, clearDisconnectTimer]);
+
+  // Tears down the OUTGOING leg of a glare conflict. Unlike `endCall` it does
+  // NOT emit call-ended to the peer (they will stay on their outgoing call as
+  // the initiator), and it does NOT touch incomingCall — the peer's offer we
+  // keep so the user can answer it.
+  const abortOutgoingCall = useCallback(() => {
+    clearDisconnectTimer();
+    if (peerRef.current) {
+      peerRef.current.close();
+      peerRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    localStreamRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+    setIsCallActive(false);
+    setIsMuted(false);
+    setIsVideoEnabled(true);
+    setRemoteMuted(false);
+    setRemoteVideoOff(false);
+    setCallType(null);
+    setCallConnectionState("connecting");
+    setIsCallInitiator(false);
+    callActiveRef.current = false;
+    callInitiatorRef.current = false;
+    remotePeerIdRef.current = null;
+    remoteStreamRef.current = null;
+    iceQueue.current = [];
+  }, [socket, clearDisconnectTimer]);
 
   // Schedules an automatic end-of-call once the WebRTC connection has dropped.
   // `immediate` is used when the connection is irrecoverably failed/closed;
@@ -198,8 +249,25 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
   const startCall = useCallback(
     async (peerId: string, callType: "video" | "audio", chatId?: string) => {
+      // Glare resolution: if we're already receiving a call from the exact
+      // peer we're about to call, only one side can initiate. A deterministic
+      // rule (the lower userId wins the "initiator" role) keeps both clients
+      // in sync so we don't end up with two overlapping call UIs.
+      if (incomingCall?.from === peerId && currentUserIdRef.current) {
+        const myId = currentUserIdRef.current;
+        const iWinInitiator = myId < peerId;
+        if (!iWinInitiator) {
+          toast.info("You already have an incoming call from this user");
+          return;
+        }
+        // We keep the initiator role — drop the incoming call UI, proceed
+        // with the outgoing call.
+        setIncomingCall(null);
+      }
+
       const pc = createPeerConnection();
       remotePeerIdRef.current = peerId;
+      callInitiatorRef.current = true;
       setIsVideoEnabled(callType === "video");
       setCallType(callType);
       setCallConnectionState("connecting");
@@ -211,6 +279,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
           audio: true,
         });
         setLocalStream(stream);
+        localStreamRef.current = stream;
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
         const offer = await pc.createOffer();
@@ -222,13 +291,14 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
         setIsCallActive(true);
+        callActiveRef.current = true;
       } catch (err) {
         console.error("Call start error:", err);
         toast.error("Could not access microphone/camera");
         resetCallState();
       }
     },
-    [createPeerConnection, socket, resetCallState],
+    [createPeerConnection, socket, resetCallState, incomingCall],
   );
 
   const acceptIncomingCall = useCallback(async () => {
@@ -240,6 +310,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
     setCallType(incomingCall.callType ?? "audio");
     setCallConnectionState("connecting");
     setIsCallInitiator(false);
+    callInitiatorRef.current = false;
 
     try {
       // 1. MUST set remote description FIRST
@@ -256,6 +327,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
         audio: true,
       });
       setLocalStream(stream);
+      localStreamRef.current = stream;
       stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
       // 4. Create Answer
@@ -264,6 +336,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
 
       socket?.emit("call-accepted", { to: incomingCall.from, answer });
       setIsCallActive(true);
+      callActiveRef.current = true;
       setIncomingCall(null);
     } catch (err) {
       console.error("Accept call error:", err);
@@ -322,7 +395,40 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("incomming-call", (data: IIncomingCall) => setIncomingCall(data));
+    socket.on("incomming-call", (data: IIncomingCall) => {
+      // Glare: an incoming call from a peer we are ALREADY actively calling
+      // (outgoing). Both sides dialed each other at the same time. Resolve
+      // deterministically so we end up with exactly one call — the lower
+      // userId takes the initiator role and the higher one answers it.
+      const inOutgoingCall =
+        callActiveRef.current &&
+        callInitiatorRef.current &&
+        remotePeerIdRef.current === data.from;
+
+      if (inOutgoingCall && currentUserIdRef.current) {
+        const iWinInitiator = currentUserIdRef.current < data.from;
+        if (iWinInitiator) {
+          // We keep the outgoing call; ignore the peer's duplicate incoming.
+          console.log(
+            "[glare] keeping outgoing call with",
+            data.from,
+            "(I am initiator)",
+          );
+          return;
+        }
+        // We lose the initiator role. Drop our outgoing leg and answer the
+        // peer's incoming offer instead, so only one connection is set up.
+        console.log(
+          "[glare] dropping outgoing call, answering incoming from",
+          data.from,
+        );
+        abortOutgoingCall();
+        setIncomingCall(data);
+        return;
+      }
+
+      setIncomingCall(data);
+    });
     socket.on("call-accepted", async ({ answer }) => {
       if (peerRef.current) {
         try {
@@ -370,7 +476,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       socket.off("call-rejected");
       socket.off("peer-media-state");
     };
-  }, [socket, resetCallState, processIceQueue]);
+  }, [socket, resetCallState, processIceQueue, abortOutgoingCall]);
 
   // Broadcast local media state to the remote peer when the call starts,
   // so both sides know each other's initial mute/video state.
