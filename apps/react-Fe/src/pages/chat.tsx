@@ -63,7 +63,14 @@ const ChatPage = () => {
   const { user, logout } = useAuth();
   const { socket } = useSocket();
   const { startCall, incomingCall, isCallActive } = useWebRTC();
-  const { startGroupCall } = useGroupCall();
+  const { startGroupCall, isInCall } = useGroupCall();
+
+  // While a call is incoming or already active, hide the press animation and
+  // show a "not allowed" cursor on the call buttons.
+  const callBusy = Boolean(incomingCall || isCallActive || isInCall);
+  const callBtnEnabled = "neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow";
+  const callBtnDisabled =
+    "neo-sm rounded-sm bg-cream/60 p-2 text-ink/40 opacity-70 cursor-not-allowed";
   // Create a reference using 'useRef' to hold the currently selected chat.
   // 'useRef' is used here because it ensures that the 'currentChat' value within socket event callbacks
   // will always refer to the latest value, even if the component re-renders.
@@ -881,6 +888,7 @@ const ChatPage = () => {
                     {currentChat.current?.isGroupChat ? (
                       <>
                         <button
+                          disabled={callBusy}
                           onClick={() => {
                             const roomId = currentChat.current?._id;
                             const invitees =
@@ -891,11 +899,12 @@ const ChatPage = () => {
                             startGroupCall(roomId, "audio", invitees);
                             toast.info("Starting group audio call...");
                           }}
-                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                          className={callBusy ? callBtnDisabled : callBtnEnabled}
                         >
                           <PhoneIcon className="w-6 h-6" />
                         </button>
                         <button
+                          disabled={callBusy}
                           onClick={() => {
                             const roomId = currentChat.current?._id;
                             const invitees =
@@ -906,7 +915,7 @@ const ChatPage = () => {
                             startGroupCall(roomId, "video", invitees);
                             toast.info("Starting group video call...");
                           }}
-                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                          className={callBusy ? callBtnDisabled : callBtnEnabled}
                         >
                           <VideoCameraIcon className="w-6 h-6" />
                         </button>
@@ -914,6 +923,7 @@ const ChatPage = () => {
                     ) : (
                       <>
                         <button
+                          disabled={callBusy}
                           onClick={() => {
                             const recipient =
                               currentChat.current?.participants.find(
@@ -925,11 +935,12 @@ const ChatPage = () => {
                               toast.info(`Calling ${recipient.username}...`);
                             }
                           }}
-                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                          className={callBusy ? callBtnDisabled : callBtnEnabled}
                         >
                           <PhoneIcon className="w-6 h-6" />
                         </button>
                         <button
+                          disabled={callBusy}
                           onClick={() => {
                             const recipient =
                               currentChat.current?.participants.find(
@@ -941,7 +952,7 @@ const ChatPage = () => {
                               toast.info(`Calling ${recipient.username}...`);
                             }
                           }}
-                          className="neo-sm neo-press rounded-sm bg-cream p-2 text-ink hover:bg-retro-yellow"
+                          className={callBusy ? callBtnDisabled : callBtnEnabled}
                         >
                           <VideoCameraIcon className="w-6 h-6" />
                         </button>
