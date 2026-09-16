@@ -116,14 +116,15 @@ const FeatureCard = ({
     {/* Image — right 60% */}
     <div
       className={cn(
-        "flex flex-1 items-center justify-center border-t-[3px] border-ink p-6 md:border-t-0 md:border-l-[3px] md:p-10",
+        "relative flex flex-1 overflow-hidden border-t-[3px] border-ink md:border-t-0 md:border-l-[3px]",
         feature.placeholder,
       )}
     >
-      <img
-        src={feature.image}
-        alt={`${feature.title} screenshot`}
-        className="neo-sm max-h-[70%] w-auto max-w-full object-contain"
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: `url(${feature.image})` }}
+        role="img"
+        aria-label={`${feature.title} screenshot`}
       />
     </div>
   </div>
