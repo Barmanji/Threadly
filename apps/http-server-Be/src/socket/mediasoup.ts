@@ -50,7 +50,14 @@ let mediasoupServer: Namespace | null = null;
 const initMediasoupWorker = async (): Promise<mediasoupTypes.Worker> => {
   if (worker) return worker;
 
-  worker = await createWorker();
+  worker = await createWorker({
+    // Fixed RTC port range so the EC2 security group can be narrowly opened
+    // (the mediasoup default is the whole 10000-59999 range, which is usually
+    // blocked in production). Keep this in sync with the security group rule:
+    // UDP inbound 20000-30000.
+    rtcMinPort: 20000,
+    rtcMaxPort: 30000,
+  });
 
   worker.on("died", () => {
     console.error("Mediasoup worker died");
@@ -217,6 +224,10 @@ const createTransport = async (
     enableTcp: true,
     preferUdp: true,
   });
+
+  // Cap incoming bitrate so a single participant can't flood the SFU and
+  // starve everyone else.
+  await transport.setMaxIncomingBitrate(1_500_000);
 
   participant.transports.set(transport.id, transport);
 

@@ -1006,7 +1006,7 @@ const ChatPage = () => {
                 ) : null}
               </div>
               {attachedFiles.length > 0 ? (
-                <div className="grid grid-cols-5 gap-5 p-4 justify-start max-w-fit flex-shrink-0">
+                <div className="grid grid-cols-5 gap-5 p-4 pb-6 justify-start max-w-fit flex-shrink-0">
                   {attachedFiles.map((file, i) => {
                     const kind = getFileKind(file.name, file.type);
                     const previewUrl = URL.createObjectURL(file);

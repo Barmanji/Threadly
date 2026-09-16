@@ -193,6 +193,27 @@ const initializeSocketIO = (io: Server) => {
       socket.on("call-user", (data) => {
         const { to, offer, callType, chatId } = data;
         const senderId = socket.user?._id?.toString();
+        // If the callee is already on a 1:1 call with a DIFFERENT user,
+        // tell the caller they're busy and don't relay the offer — otherwise
+        // the callee's UI would stack a second incoming call on top of the
+        // active one. Calls between the same two users (glare, both dialed
+        // each other) are allowed through so the client can resolve them.
+        const calleeBusyWith = to ? activeCalls.get(to) : null;
+        if (calleeBusyWith && calleeBusyWith !== senderId) {
+          console.log(
+            `[call-user] ${senderId} -> ${to} busy in call with ${calleeBusyWith}`,
+          );
+          socket.emit("call-busy", {
+            to,
+            busyWith: calleeBusyWith,
+            fromUser: {
+              _id: socket.user?._id,
+              username: socket.user?.username,
+              avatar: socket.user?.avatar,
+            },
+          });
+          return;
+        }
         if (senderId) registerCall(senderId, to);
         socket.to(to).emit("incomming-call", {
           from: socket.user?._id,

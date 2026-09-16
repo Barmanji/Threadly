@@ -120,15 +120,14 @@ const sendMessage: RequestHandler = asyncHandler(
           try {
             // Pick an explicit Cloudinary resource type. Office documents must be
             // stored as "raw" (auto-detection is flaky for zip-based formats
-            // like docx/pptx), while PDFs should stay as image assets so they
-            // get proper delivery/transform support.
+            // like docx/pptx). PDFs are NOT sent as "image" — the image
+            // resource type has a 20MB limit on free tier, which rejects
+            // larger PDFs on production. "raw" supports up to 100MB.
             const resourceType: "auto" | "image" | "video" | "raw" =
               attachment.mimetype.startsWith("image/")
                 ? "image"
                 : attachment.mimetype.startsWith("video/")
                 ? "video"
-                : attachment.mimetype === "application/pdf"
-                ? "image"
                 : "raw";
             const uploadResult = await uploadResultCloudinary(
               attachment.path,

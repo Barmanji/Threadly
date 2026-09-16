@@ -25,8 +25,14 @@ const uploadResultCloudinary = async (localFilePath: string, resourceType: 'auto
         return responseCloudnary;
     }
     catch(error) {
-        console.log("Error while uploading on cloudinary: ", error);
-        fs.unlinkSync(localFilePath)
+        console.error("Error while uploading on cloudinary: ", error);
+        try {
+            fs.unlinkSync(localFilePath)
+        } catch (unlinkError) {
+            // The temp file may already be gone (e.g. /public/temp cleaned up
+            // by PM2 / tmpwatch). Don't mask the original upload error.
+            console.error("Error while removing local temp file: ", unlinkError);
+        }
         return null
         //removes the locally saved temp file as the upload opreation got failed!
     }

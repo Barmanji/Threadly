@@ -461,6 +461,11 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       toast.error("Call was declined");
       resetCallState();
     });
+    socket.on("call-busy", ({ busyWith }: { busyWith?: string }) => {
+      console.log("call-busy received, callee is in another call:", busyWith);
+      toast.error(busyWith ? "User is already in another call" : "User is busy");
+      resetCallState();
+    });
 
     // Track remote peer's media state (mute/video-off)
     socket.on("peer-media-state", ({ audio, video }: { audio?: boolean; video?: boolean }) => {
@@ -474,6 +479,7 @@ export const WebRTCProvider = ({ children }: { children: ReactNode }) => {
       socket.off("ice-candidate");
       socket.off("call-ended");
       socket.off("call-rejected");
+      socket.off("call-busy");
       socket.off("peer-media-state");
     };
   }, [socket, resetCallState, processIceQueue, abortOutgoingCall]);
