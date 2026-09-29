@@ -362,9 +362,14 @@ const Whiteboard: React.FC<WhiteboardProps> = ({ chatId, onClose }) => {
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-paper">
-      {/* Toolbar */}
+      {/* Toolbar. The height is pinned rather than left to its content so that
+          the callers which flank the board (the audio call puts a PFP column on
+          the left and a control strip on the right) can line their own borders
+          up with this one exactly. 48px = the tallest child (h-7 buttons) plus
+          p-2 either side plus the 4px bottom border, so pinning it is a no-op
+          visually. */}
       {onClose && (
-        <div className="flex flex-shrink-0 items-center justify-between border-b-4 border-ink bg-cream p-2">
+        <div className="flex h-12 flex-shrink-0 items-center justify-between border-b-4 border-ink bg-cream p-2">
           <div className="flex items-center gap-2">
             <p className="px-1 font-extrabold uppercase tracking-wide text-ink">
               Whiteboard

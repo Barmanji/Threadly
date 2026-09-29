@@ -197,7 +197,15 @@ const CallModal: React.FC<CallModalProps> = ({
       const onMove = (ev: MouseEvent) => {
         if (!draggingRef.current) return;
         const delta = ev.clientY - dragStartYRef.current;
-        setWhiteboardHeight(Math.max(150, Math.min(dragStartHRef.current + delta, window.innerHeight - 200)));
+        // From `sm` the panel is an overlay pinned to the top of the chat pane
+        // rather than a sibling in the flow, so growing it no longer pushes the
+        // composer down. That also means an unbounded height would cover the
+        // composer instead, so the ceiling leaves room for the header, the
+        // composer and a peek of the conversation. On mobile the 45vh cap
+        // dominates this anyway.
+        setWhiteboardHeight(
+          Math.max(150, Math.min(dragStartHRef.current + delta, window.innerHeight - 320)),
+        );
       };
       const onUp = () => {
         draggingRef.current = false;
@@ -369,9 +377,16 @@ const CallModal: React.FC<CallModalProps> = ({
   if (!isCallActive) return null;
 
   // Video call: resizable layout with drag handle.
+  //
+  // From `sm` the panel is an overlay pinned to the top of the chat pane rather
+  // than a sibling in the flow. Inline, it took its height out of the message
+  // list, so dragging the handle made the whole conversation slide up and down
+  // underneath it. Out of flow the list keeps its exact height and never moves;
+  // a taller panel simply covers more of the older messages. Mobile keeps the
+  // inline version, where the panel is capped and the conversation sits below it.
   if (callType === "video") {
     return (
-      <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+      <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)] sm:absolute sm:inset-x-0 sm:top-0 sm:z-20">
         {/* Route the remote audio to the speakers. The tiles are muted
             (see remoteTile), so without this the peer's voice is dropped
             entirely in a video call. */}
@@ -543,8 +558,12 @@ const CallModal: React.FC<CallModalProps> = ({
   }
 
   // Audio call: whiteboard always mounted (hidden via CSS), toggled by user.
+  //
+  // `sm:absolute` for the same reason as the video panel: inline, the drag
+  // handle resized the board out of the message list's height and the
+  // conversation visibly jumped on every pixel of the drag.
   return (
-    <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+    <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)] sm:absolute sm:inset-x-0 sm:top-0 sm:z-20">
       {/* Route the remote audio to the speakers */}
       {remoteStream && (
         <audio
@@ -590,8 +609,15 @@ const CallModal: React.FC<CallModalProps> = ({
                 `sm` up. The 192px column left the board ~127px wide on a phone.
                 `sm:flex-none` restores `flex: 0 0 auto`: the mobile `flex-1`
                 would otherwise set `flex-basis: 0%`, which overrides `w-48`
-                and lets this column grow into the board. */}
-            <div className="flex min-w-0 flex-1 items-center justify-center gap-4 border-r-4 border-ink p-2 sm:w-48 sm:flex-none sm:flex-col sm:gap-4 sm:p-3">
+                and lets this column grow into the board.
+
+                The absolute child continues the board's toolbar underline
+                across this column, so the rule runs the full width of the
+                panel instead of stopping at the board's edges. Absolute rather
+                than a spacer so `justify-center` still centres the avatars.
+                h-12 matches the toolbar's pinned height. */}
+            <div className="relative flex min-w-0 flex-1 items-center justify-center gap-4 border-r-4 border-ink p-2 sm:w-48 sm:flex-none sm:flex-col sm:gap-4 sm:p-3">
+              <div className="pointer-events-none absolute inset-x-0 top-0 hidden h-12 border-b-4 border-ink sm:block" />
               {/* Remote */}
               <div className="flex min-w-0 items-center gap-2 sm:contents">
                 <div
@@ -662,8 +688,11 @@ const CallModal: React.FC<CallModalProps> = ({
             </div>
 
             {/* Controls strip. The avatars' right border separates them on mobile,
-                so the left border is only needed in the desktop column layout. */}
-            <div className="flex w-14 flex-shrink-0 flex-col items-center justify-center gap-3 bg-cream p-2 sm:border-l-4 sm:border-ink">
+                so the left border is only needed in the desktop column layout.
+                The absolute child continues the toolbar underline across this
+                strip too, completing the rule. */}
+            <div className="relative flex w-14 flex-shrink-0 flex-col items-center justify-center gap-3 bg-cream p-2 sm:border-l-4 sm:border-ink">
+              <div className="pointer-events-none absolute inset-x-0 top-0 hidden h-12 border-b-4 border-ink sm:block" />
               <button
                 onClick={toggleMute}
                 className={classNames(
