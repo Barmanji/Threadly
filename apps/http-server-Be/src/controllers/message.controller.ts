@@ -8,6 +8,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { removeLocalFile } from "../utils/helper.js";
+import logger from "../logger/winston.logger.js";
 import { Request, RequestHandler, Response } from "express";
 import { uploadResultCloudinary } from "../utils/fileUploaderCloudinary.js";
 
@@ -150,7 +151,11 @@ const sendMessage: RequestHandler = asyncHandler(
               size: attachment.size,
             };
           } catch (error) {
-            console.error(`Upload failed for ${attachment.path}:`, error);
+            logger.error(
+              `Failed to upload attachment ${attachment.path}: ${
+                error instanceof Error ? error.message : "unknown error"
+              }`,
+            );
             throw error;
           }
         },
@@ -159,8 +164,6 @@ const sendMessage: RequestHandler = asyncHandler(
       // Wait for all uploads to complete
       const uploadedFiles: any = await Promise.all(uploadPromises);
       messageFiles.push(...uploadedFiles);
-
-      console.log(`Successfully uploaded ${messageFiles.length} files`);
     }
 
     // Create a new message instance with appropriate metadata
@@ -170,8 +173,6 @@ const sendMessage: RequestHandler = asyncHandler(
       chat: new mongoose.Types.ObjectId(chatId),
       attachments: messageFiles,
     });
-    console.log("Message created with ID:", message._id);
-
     // update the chat's last message which could be utilized to show last message in the list item
     const chat = await Chat.findByIdAndUpdate(
       chatId,
@@ -182,7 +183,6 @@ const sendMessage: RequestHandler = asyncHandler(
       },
       { new: true },
     );
-    console.log("Chat updated, fetching structured message...");
     // structure the message
     const messages = await ChatMessage.aggregate([
       {
@@ -195,28 +195,17 @@ const sendMessage: RequestHandler = asyncHandler(
 
     // Store the aggregation result
     const receivedMessage = messages[0];
-    console.log("Structured message:", receivedMessage ? "EXISTS" : "NULL");
 
     if (!receivedMessage) {
       throw new ApiError(500, "Internal server error");
     }
-    console.log("=== ABOUT TO EMIT SOCKET EVENTS ===");
-    console.log("Chat participants:", chat.participants);
 
     // logic to emit socket event about the new message created to the other participants
     chat.participants.forEach((participantObjectId: ObjectId) => {
-      console.log("Processing participant:", participantObjectId.toString());
-
+      // The sender already has this message optimistically in their UI.
       if (participantObjectId.toString() === (req.user as any)._id.toString()) {
-        console.log("Skipping sender (self)");
         return;
       }
-
-      console.log(
-        "Emitting to participant room:",
-        participantObjectId.toString(),
-      );
-      console.log("Event name:", ChatEventEnum.MESSAGE_RECEIVED_EVENT);
 
       emitSocketEvent(
         req,
@@ -224,14 +213,7 @@ const sendMessage: RequestHandler = asyncHandler(
         ChatEventEnum.MESSAGE_RECEIVED_EVENT,
         receivedMessage,
       );
-
-      console.log(
-        "Emission completed for participant:",
-        participantObjectId.toString(),
-      );
     });
-
-    console.log("=== ALL SOCKET EMISSIONS COMPLETED ===");
 
     return res
       .status(201)
@@ -269,15 +251,11 @@ const downloadAttachment: RequestHandler = asyncHandler(async (req, res) => {
       "User-Agent": "Mozilla/5.0 (compatible; ChatApp/1.0)",
     },
   });
-  console.log(
-    "[download-attachment] cloudinary",
-    response.status,
-    response.headers.get("content-type"),
-    "len=" + response.headers.get("content-length"),
-    url,
-  );
   if (!response.ok) {
-    throw new ApiError(502, "Could not fetch the file from storage");
+    throw new ApiError(
+      502,
+      "Could not fetch the file from storage. Please try downloading it again.",
+    );
   }
 
   const safeName = filename.replace(/[^\w.-]+/g, "_") || "download";

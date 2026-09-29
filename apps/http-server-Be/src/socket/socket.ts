@@ -4,6 +4,7 @@ import { Server, Socket } from "socket.io";
 import { ChatEventEnum } from "../constants.js";
 import { User, IUser } from "../models/user/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
+import logger from "../logger/winston.logger.js";
 import type { Request } from "express";
 
 type AvailableChatEvents = (typeof ChatEventEnum)[keyof typeof ChatEventEnum];
@@ -132,10 +133,7 @@ const mountWhiteboardOpenCancelEvent = (socket: Socket): void => {
  * Initialize socket server
  */
 const initializeSocketIO = (io: Server) => {
-  console.log("io: ", io);
   return io.on("connection", async (rawSocket: Socket) => {
-    console.log("io2: ", io, "\n rawSoc: ", rawSocket);
-
     const socket = rawSocket as SocketWithUser;
     try {
       // parse the cookies from the handshake headers (This is only possible if client has `withCredentials: true`)
@@ -200,8 +198,8 @@ const initializeSocketIO = (io: Server) => {
         // each other) are allowed through so the client can resolve them.
         const calleeBusyWith = to ? activeCalls.get(to) : null;
         if (calleeBusyWith && calleeBusyWith !== senderId) {
-          console.log(
-            `[call-user] ${senderId} -> ${to} busy in call with ${calleeBusyWith}`,
+          logger.debug(
+            `[call-user] ${senderId} -> ${to} is already on a call with ${calleeBusyWith}`,
           );
           socket.emit("call-busy", {
             to,
@@ -276,7 +274,6 @@ const initializeSocketIO = (io: Server) => {
       socket.on("call-ended", (data) => {
         const { to } = data;
         const senderId = socket.user?._id?.toString();
-        console.log("[call-ended] emitted by:", senderId, "to:", to);
         socket.to(to).emit("call-ended", {
           from: socket.user?._id,
         });
@@ -384,18 +381,11 @@ const initializeSocketIO = (io: Server) => {
       });
 
       socket.on(ChatEventEnum.DISCONNECT_EVENT, () => {
-        console.log("user has disconnected 🚫. userId: " + socket.user?._id);
         if (socket.user?._id) {
           const userId = socket.user._id.toString();
           // If the user was in an active call, forcefully notify the peer so
           // their UI doesn't get stuck on the call screen.
           const peers = deregisterUserCalls(userId);
-          console.log(
-            "[disconnect] user:",
-            userId,
-            "was in active call, notifying:",
-            peers,
-          );
           peers.forEach((peerId) => {
             io.to(peerId).emit("call-ended", { from: userId });
           });
@@ -417,17 +407,10 @@ const emitSocketEvent = (
   event: AvailableChatEvents,
   payload: unknown,
 ): void => {
-  console.log("emitSocketEvent called with:", {
-    roomId,
-    event,
-    hasPayload: !!payload,
-    hasIO: !!req.app.get("io"),
-  });
-
   const io = req.app.get("io") as Server;
 
   if (!io) {
-    console.error("NO IO INSTANCE FOUND ON REQ.APP");
+    logger.error(`[socket] Cannot emit "${event}": no io instance on req.app`);
     return;
   }
 

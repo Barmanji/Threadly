@@ -175,14 +175,16 @@ const ChatPage = () => {
   };
 
   const getMessages = async () => {
-    // Check if a chat is selected, if not, show an alert
+    // A chat must be selected. This is a genuine, actionable state (shown by
+    // the empty state in the UI), so it stays as a toast.
     if (!currentChat.current?._id) return toast.error("No chat is selected");
 
-    // Check if socket is available, if not, show an alert
-    if (!socket) return toast.error("Socket not available");
-
-    // Emit an event to join the current chat
-    socket.emit(JOIN_CHAT_EVENT, currentChat.current?._id);
+    // Emitting is fire-and-forget: the message list comes from the HTTP call
+    // below, which has no dependency on the socket. Previously this returned
+    // early with a "Socket not available" toast whenever the socket hadn't
+    // finished its handshake yet, which is exactly what happens on a page
+    // refresh — users saw the toast twice and lost the fetch.
+    socket?.emit(JOIN_CHAT_EVENT, currentChat.current?._id);
 
     // Filter out unread messages from the current chat as those will be read
     setUnreadMessages(
@@ -561,21 +563,14 @@ const ChatPage = () => {
 
     if (!socket) return;
 
-    // FIX: Debugging -------------------------------------------------------
-    console.log("Socket initial state:", { socket: !!socket, isConnected });
-    // Check if socket is already connected
-    if (socket.connected) {
-      console.log("Socket already connected, setting isConnected to true");
-      setIsConnected(true);
-    }
+    // Make sure we're actually connected. The socket is created eagerly by
+    // SocketContext, but the handshake is still async — kick it if it hasn't
+    // completed yet. No user-facing noise: `isConnected` from the context is
+    // what gates anything that needs a live connection.
     if (!socket.connected) {
-      console.log("Socket not connected, attempting to connect...");
       socket.connect();
     }
-    socket.onAny((event, ...args) => {
-      console.log("🔔 Socket event received:", event, args);
-    });
-    // FIX: ---------------------------------------------------------
+
     // Set up event listeners for various socket events:
     // Listener for when the socket connects.
     socket.on(CONNECTED_EVENT, onConnect);
