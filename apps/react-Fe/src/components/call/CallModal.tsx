@@ -450,7 +450,9 @@ const CallModal: React.FC<CallModalProps> = ({
             visibility toggled via CSS so strokes are never lost. */}
         {createPortal(
             <div
-              className="fixed inset-0 z-50 flex flex-col bg-ink p-4"
+              // `max()` so the desktop value stays exactly the 1rem it already
+              // had, while a phone with a home indicator reserves room for it.
+              className="fixed inset-0 z-50 flex flex-col bg-ink p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
               style={{ display: isVisible ? "flex" : "none" }}
             >
               <div className="mb-4 flex flex-shrink-0 items-center justify-between">
@@ -474,16 +476,24 @@ const CallModal: React.FC<CallModalProps> = ({
                 </button>
               </div>
 
-              <div className="flex min-h-0 flex-1 gap-4">
+              {/* On a phone the 288px strip left the whiteboard 39px wide, so
+                  below `sm` the tiles go into a horizontal row on top and the
+                  whiteboard takes the full width underneath. The `sm:` classes
+                  reproduce the desktop split exactly. */}
+              <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row sm:gap-4">
                 {/* Whiteboard */}
                 <div className="min-h-0 flex-1 overflow-hidden rounded-xl border-4 border-ink bg-paper">
                   <Whiteboard chatId={chatId} onClose={toggleWhiteboard} />
                 </div>
 
                 {/* Participants strip (the call keeps running) */}
-                <div className="flex w-72 flex-shrink-0 flex-col gap-4">
-                  {remoteTile("min-h-0 flex-1 w-full flex-shrink-0")}
-                  {localTile("min-h-0 flex-1 w-full flex-shrink-0")}
+                <div className="flex h-24 flex-shrink-0 flex-row gap-3 sm:h-auto sm:w-72 sm:flex-col sm:gap-4">
+                  {remoteTile(
+                    "h-full w-32 min-h-0 flex-shrink-0 sm:flex-1 sm:h-auto sm:w-full",
+                  )}
+                  {localTile(
+                    "h-full w-32 min-h-0 flex-shrink-0 sm:flex-1 sm:h-auto sm:w-full",
+                  )}
                 </div>
               </div>
 

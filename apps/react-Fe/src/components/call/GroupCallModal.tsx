@@ -205,7 +205,7 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-ink p-4">
+    <div className="absolute inset-0 z-50 flex flex-col bg-ink p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
       {/* Header */}
       <div className="mb-4 flex flex-shrink-0 items-center justify-between">
         <span className="w-10" />
@@ -231,9 +231,15 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
       {/* Main content — always-mounted whiteboard (hidden via CSS),
           grid layout toggled via CSS. */}
       <div className="min-h-0 flex-1">
-        {/* Whiteboard layout — always mounted, hidden when not visible */}
+        {/* Whiteboard layout — always mounted, hidden when not visible.
+
+            On a phone the side-by-side split left the whiteboard ~140px wide
+            (375 - padding - the 192px rail), which is unusable. Below `sm` the
+            faces move into a horizontal strip on top and the whiteboard takes
+            the full width underneath. `sm:` restores the desktop split exactly,
+            so the web layout is unchanged. */}
         <div
-          className="flex h-full gap-4"
+          className="flex h-full flex-col gap-3 sm:flex-row sm:gap-4"
           style={{ display: isWhiteboardVisible ? "flex" : "none" }}
         >
           {/* Whiteboard */}
@@ -243,13 +249,14 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
               onClose={() => setIsWhiteboardVisible(false)}
             />
           </div>
-          {/* Participant thumbnails (compact) */}
-          <div className="flex w-48 flex-shrink-0 flex-col gap-3 overflow-y-auto rounded-xl border-4 border-ink bg-cream p-3">
-            <p className="text-center text-[10px] font-extrabold uppercase tracking-wider text-ink">
+          {/* Participant thumbnails. A horizontal, scrollable strip on phones;
+              the vertical 192px rail from `sm` up. */}
+          <div className="flex h-24 flex-shrink-0 flex-row gap-2 overflow-x-auto rounded-xl border-4 border-ink bg-cream p-2 sm:h-auto sm:w-48 sm:flex-col sm:gap-3 sm:overflow-y-auto sm:p-3">
+            <p className="hidden text-center text-[10px] font-extrabold uppercase tracking-wider text-ink sm:block">
               Participants
             </p>
             {/* Local */}
-            <div className="relative aspect-video overflow-hidden rounded-lg border-[3px] border-ink bg-retro-yellow">
+            <div className="relative h-full w-32 flex-shrink-0 overflow-hidden rounded-lg border-[3px] border-ink bg-retro-yellow sm:aspect-video sm:h-auto sm:w-full">
               {localStream &&
               localStream.getVideoTracks().length > 0 &&
               cameraOn ? (
@@ -296,7 +303,7 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
               return (
                 <div
                   key={participant.id}
-                  className="relative aspect-video overflow-hidden rounded-lg border-[3px] border-ink bg-retro-orange"
+                  className="relative h-full w-32 flex-shrink-0 overflow-hidden rounded-lg border-[3px] border-ink bg-retro-orange sm:aspect-video sm:h-auto sm:w-full"
                 >
                   {hasVideo ? (
                     <video
