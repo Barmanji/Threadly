@@ -26,7 +26,8 @@ const RESEND_COOLDOWN_SECONDS = 60;
 
 const Register = () => {
   const navigate = useNavigate();
-  const { register, verifyEmail, resendVerificationCode, isAuthPending } = useAuth();
+  const { register, verifyEmail, resendVerificationCode, isAuthPending } =
+    useAuth();
 
   /**
    * Single source of truth for the form, and deliberately NEVER reset by an
@@ -46,7 +47,9 @@ const Register = () => {
    * Fields the user has actually interacted with. Live validation only speaks
    * up for touched fields, so an untouched empty form isn't a wall of red.
    */
-  const [touched, setTouched] = useState<Partial<Record<RegisterField, boolean>>>({});
+  const [touched, setTouched] = useState<
+    Partial<Record<RegisterField, boolean>>
+  >({});
 
   /** Set on the first submit; from then on every known error is shown. */
   const [submitted, setSubmitted] = useState(false);
@@ -107,7 +110,10 @@ const Register = () => {
     };
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const next: RegisterValues = { ...values, avatar: e.target.files?.[0] || null };
+    const next: RegisterValues = {
+      ...values,
+      avatar: e.target.files?.[0] || null,
+    };
     setValues(next);
     setTouched((prev) => ({ ...prev, avatar: true }));
     applyFieldError("avatar", validateRegisterField("avatar", next));
@@ -141,7 +147,10 @@ const Register = () => {
     );
 
     if (fieldError) {
-      setTouched((prev) => ({ ...prev, [fieldError.path as RegisterField]: true }));
+      setTouched((prev) => ({
+        ...prev,
+        [fieldError.path as RegisterField]: true,
+      }));
       applyFieldError(fieldError.path as RegisterField, fieldError.message);
       return;
     }
@@ -204,7 +213,8 @@ const Register = () => {
       // driven by the server rather than guessed at on the client.
       const match = result.message.match(/(\d+)\s+attempt/i);
       if (match) setAttemptsLeft(Number(match[1]));
-      else if (/all \d+ attempts|no attempts/i.test(result.message)) setAttemptsLeft(0);
+      else if (/all \d+ attempts|no attempts/i.test(result.message))
+        setAttemptsLeft(0);
       return;
     }
 
@@ -233,10 +243,10 @@ const Register = () => {
   if (step === "verify") {
     return (
       <div className="relative flex h-dvh w-full flex-col items-center justify-center overflow-y-auto bg-doodle bg-doodle-scroll px-4 py-10">
-      <div className="absolute right-4 top-4 z-20 flex items-center gap-3">
-        <ChangelogLink size="md" />
-        <ThemeToggle />
-      </div>
+        <div className="absolute right-4 top-4 z-20 flex items-center gap-3">
+          <ChangelogLink size="md" />
+          <ThemeToggle />
+        </div>
         <h1 className="neo rotate-[2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
           Threadly
         </h1>
@@ -249,8 +259,14 @@ const Register = () => {
 
           <p className="text-center text-sm font-semibold leading-relaxed text-ink">
             We sent a 6-digit code to{" "}
-            <span className="font-extrabold">{maskedEmail || values.email}</span>.
-            Enter it below to finish setting up your account.
+            <span className="font-extrabold">
+              {maskedEmail || values.email}
+            </span>
+            . Enter it below to finish setting up your account.
+            <p className="text-center text-sm font-semibold leading-relaxed text-ink">
+              check the <span className="font-extrabold">spam folder </span>
+               if you can't find code in inbox.
+            </p>
           </p>
 
           <OtpInput
