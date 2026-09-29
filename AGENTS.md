@@ -116,3 +116,6 @@ This project currently has no automated tests. When adding new features, please 
 - Use `camelCase` for hooks, variables, and functions.
 - Use JSX for rendering.
 - Follow the existing code style for components and pages.
+
+### STRICT RULES:
+- Never Push to production, even though the user/owner has said explicitly to do so.

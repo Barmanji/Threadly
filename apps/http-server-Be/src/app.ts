@@ -9,6 +9,8 @@ import { Server } from "socket.io";
 import session from "express-session";
 import passport from "passport";
 import { ApiError } from "./utils/ApiError.js";
+import { ApiResponse } from "./utils/ApiResponse.js";
+import { errorHandler } from "./middlewares/error.middleware.js";
 import morganMiddleware from "./logger/morgor.logger.js";
 import { initializeSocketIO } from "./socket/socket.js";
 import { setupMediasoup } from "./socket/mediasoup.js";
@@ -104,6 +106,34 @@ app.use("/api/v1/messages", messageRouter);
 app.use("/api/v1/call-logs", callLogRouter);
 app.use("/api/v1/healthcheck", healthcheckRouter);
 
+// ---------------------------------------------------------------------------
+// Error handling — this MUST come after every router.
+//
+// Until now `errorHandler` was written but never mounted, so every
+// `throw new ApiError(...)` in a controller fell through to Express 5's
+// built-in handler, which replies with an **HTML** body. The frontend reads
+// `error.response.data.message`, which was therefore always `undefined` and
+// users just saw a generic "Something went wrong".
+//
+// `swaggerUi.setup()` returns `(req, res) => res.send(html)` with no route
+// guard and no `next()`, and it is mounted on "/", so it swallows every
+// request that reaches it. That is why the JSON 404 below is scoped to
+// `/api` and registered *before* the swagger mount.
+// ---------------------------------------------------------------------------
+app.use("/api", (req: Request, res: Response) => {
+  res.status(404).json(
+    new ApiResponse(
+      404,
+      null,
+      `${req.method} ${req.originalUrl} is not a valid endpoint. Check the URL and try again.`,
+    ),
+  );
+});
+
+app.use(errorHandler);
+
+// Swagger docs are served from the root and intentionally mounted last so
+// they never shadow an API route.
 app.use(
   "/",
   swaggerUi.serve,

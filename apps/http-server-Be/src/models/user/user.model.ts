@@ -16,10 +16,37 @@ export interface IUser {
     status: "online" | "offline";
     refreshToken: string;
     friends?: mongoose.Types.ObjectId[];
+
+    /**
+     * Whether the owner has proven they can receive mail at `email`.
+     *
+     * NOTE: deliberately OPTIONAL with no default. Accounts that predate the
+     * Resend integration have the field absent (`undefined`) and must keep
+     * working, so the login guard compares strictly against `false`. Setting
+     * `default: false` here would lock out every existing user.
+     */
+    isEmailVerified?: boolean;
+
+    /** Present only while a verification code is outstanding. */
+    emailVerification?: {
+        /** bcrypt hash of the 6-digit code — the raw code is never stored. */
+        codeHash: string;
+        expiresAt: Date;
+        attempts: number;
+        lastSentAt: Date;
+    } | null;
+
     _id?: mongoose.Types.ObjectId;
     createdAt?: Date;
     updatedAt?: Date;
 }
+
+/** How long a verification code stays valid. */
+export const EMAIL_VERIFICATION_TTL_MS = 10 * 60 * 1000; // 10 minutes
+/** Wrong codes allowed before the code is destroyed and must be re-sent. */
+export const EMAIL_VERIFICATION_MAX_ATTEMPTS = 5;
+/** Minimum gap between two sends of a verification code. */
+export const EMAIL_VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000;
 
 // ---------------------------
 // 2. User Methods Interface
@@ -62,6 +89,26 @@ const userSchema = new Schema<IUser, Model<IUser, {}, IUserMethods>, {}, IUserMe
         refreshToken: {
             type: String,
             default: "",
+        },
+        // No `default` — see the note on IUser.isEmailVerified. Accounts
+        // created before this feature have no value for this field at all.
+        isEmailVerified: {
+            type: Boolean,
+        },
+        // A single embedded sub-document rather than separate top-level
+        // fields, so clearing it after a successful verification is one unset
+        // and can never leave orphaned state behind.
+        emailVerification: {
+            type: new Schema(
+                {
+                    codeHash: { type: String, required: true },
+                    expiresAt: { type: Date, required: true },
+                    attempts: { type: Number, default: 0 },
+                    lastSentAt: { type: Date, required: true },
+                },
+                { _id: false },
+            ),
+            default: undefined,
         },
     },
     { timestamps: true }

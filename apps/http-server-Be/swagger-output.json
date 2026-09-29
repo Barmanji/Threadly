@@ -1,574 +1,634 @@
 {
-    "swagger": "2.0",
-    "info": {
-        "title": "Threadly",
-        "description": "# Threadly.com\n\n**Threadly** is a modern real-time chat platform that brings people closer together through instant messaging, video calls, and file sharing.\n\nKey features of Threadly include:\n\n1. **💬 Real-time Chat:** Enjoy instant messaging with individuals or groups.\n2. **🎥 Live Video:** Connect face-to-face with high-quality live video calls.\n\n3. **📎 Send Attachments:** Easily share photos, videos, documents, and other files.\n\n4. **👥 Group Conversations:** Create and manage group chats with friends, family, or teams.\n\n5. **✨ Modern UX:** A sleek, responsive interface designed for speed and simplicity.\n\n6. **🔒 Secure Communication:** Protect your messages with secure data handling.\n\nThreadly focuses on providing a fast, engaging, and feature-rich communication experience for everyone.\n\n## 🏁 Installation\n\nClone the repository and follow the [README](https://github.com/Barmanji/chatOliver_monorepo) to install dependencies and configure environment variables.\n\n## 🐞 Reporting issues\n\nIf you find bugs or issues, please open an issue on the project's [GitHub repository.](https://github.com/Barmanji/chatOliver_monorepo/issues/new)",
-        "version": "1.0.0"
-    },
-    "host": "localhost:3004",
-    "basePath": "/",
-    "schemes": ["http"],
-    "paths": {
-        "/api/v1/user/register": {
-            "post": {
-                "description": "",
-                "responses": {
-                    "201": {
-                        "description": "Created"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/login": {
-            "post": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "username": {
-                                    "example": "any"
-                                },
-                                "email": {
-                                    "example": "any"
-                                },
-                                "password": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/refresh-token": {
-            "post": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "refreshToken": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/get-any-user-friend-list/c/{username}": {
-            "get": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "username",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/c/{username}": {
-            "get": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "username",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/logout": {
-            "post": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/current-user": {
-            "get": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/change-password": {
-            "put": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "oldPassword": {
-                                    "example": "any"
-                                },
-                                "newPassword": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/update-account": {
-            "put": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "username": {
-                                    "example": "any"
-                                },
-                                "email": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/update-profile-picture": {
-            "put": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/update-bio": {
-            "put": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "bio": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/get-my-friend-list": {
-            "get": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/user/get-all-users": {
-            "get": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/": {
-            "get": {
-                "description": "",
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/users": {
-            "get": {
-                "description": "",
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/c/{receiverId}": {
-            "post": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "receiverId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/group": {
-            "post": {
-                "description": "",
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/group/{chatId}": {
-            "get": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            },
-            "delete": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            },
-            "patch": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/group/{chatId}/{participantId}": {
-            "post": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    },
-                    {
-                        "name": "participantId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            },
-            "delete": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    },
-                    {
-                        "name": "participantId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/leave/group/{chatId}": {
-            "delete": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/chats/remove/{chatId}": {
-            "delete": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "default": {
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/v1/messages/{chatId}": {
-            "get": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            },
-            "post": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    },
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created"
-                    }
-                }
-            }
-        },
-        "/api/v1/messages/{chatId}/{messageId}": {
-            "delete": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "chatId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    },
-                    {
-                        "name": "messageId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/call-logs/": {
-            "post": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "body",
-                        "in": "body",
-                        "schema": {
-                            "type": "object",
-                            "properties": {
-                                "receiver": {
-                                    "example": "any"
-                                },
-                                "callType": {
-                                    "example": "any"
-                                },
-                                "status": {
-                                    "example": "any"
-                                }
-                            }
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created"
-                    }
-                }
-            },
-            "get": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/call-logs/{logId}": {
-            "get": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "logId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            },
-            "delete": {
-                "description": "",
-                "parameters": [
-                    {
-                        "name": "logId",
-                        "in": "path",
-                        "required": true,
-                        "type": "string"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
-        },
-        "/api/v1/healthcheck/": {
-            "get": {
-                "description": "",
-                "responses": {
-                    "200": {
-                        "description": "OK"
-                    }
-                }
-            }
+  "swagger": "2.0",
+  "info": {
+    "title": "My API",
+    "description": "Description",
+    "version": "1.0.0"
+  },
+  "host": "localhost:3004",
+  "basePath": "/",
+  "schemes": [
+    "http"
+  ],
+  "paths": {
+    "/api/v1/user/register": {
+      "post": {
+        "description": "",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
         }
+      }
+    },
+    "/api/v1/user/login": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "example": "any"
+                },
+                "email": {
+                  "example": "any"
+                },
+                "password": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/refresh-token": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "refreshToken": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/get-any-user-friend-list/c/{username}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/c/{username}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/logout": {
+      "post": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/current-user": {
+      "get": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/change-password": {
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "oldPassword": {
+                  "example": "any"
+                },
+                "newPassword": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/update-account": {
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "username": {
+                  "example": "any"
+                },
+                "email": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/update-profile-picture": {
+      "put": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/update-bio": {
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "bio": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/get-my-friend-list": {
+      "get": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/user/get-all-users": {
+      "get": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/chats/": {
+      "get": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/whiteboard/{chatId}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/users": {
+      "get": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/c/{receiverId}": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "receiverId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/group": {
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/group/{chatId}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "patch": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/group/{chatId}/{participantId}": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "participantId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/leave/group/{chatId}": {
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/chats/remove/{chatId}": {
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/messages/attachments/download": {
+      "get": {
+        "description": "",
+        "produces": [
+          "content-type"
+        ],
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "filename",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{chatId}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "content": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{chatId}/{messageId}": {
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "chatId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/call-logs/": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "receiver": {
+                  "example": "any"
+                },
+                "callType": {
+                  "example": "any"
+                },
+                "status": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      },
+      "get": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/call-logs/{logId}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "logId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "logId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v1/healthcheck/": {
+      "get": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
+  }
 }
-

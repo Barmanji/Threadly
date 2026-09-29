@@ -3,6 +3,7 @@ import {
     deleteMessage,
     downloadAttachment,
     getAllMessages,
+    reactToMessage,
     sendMessage,
 } from "../controllers/message.controller";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
@@ -41,6 +42,18 @@ router
         mongoIdPathVariableValidator("messageId"),
         validate,
         deleteMessage,
+    );
+
+// Add, change or remove an emoji reaction. Same method for all three cases —
+// whether this replaces or removes the caller's existing reaction is decided
+// server-side from what they already reacted with.
+router
+    .route("/:chatId/:messageId/reaction")
+    .put(
+        mongoIdPathVariableValidator("chatId"),
+        mongoIdPathVariableValidator("messageId"),
+        validate,
+        reactToMessage,
     );
 
 export default router;

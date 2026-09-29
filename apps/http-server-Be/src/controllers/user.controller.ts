@@ -10,14 +10,33 @@ import { ApiResponse } from "../utils/ApiResponse";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { Types } from "mongoose";
 import { Request, Response, NextFunction, RequestHandler } from "express";
+import {
+  issueVerificationCode,
+  maskEmail,
+  verifyEmailCode,
+} from "../services/emailVerification.service";
+import {
+  EMAIL_VERIFICATION_MAX_ATTEMPTS,
+  EMAIL_VERIFICATION_RESEND_COOLDOWN_MS,
+  EMAIL_VERIFICATION_TTL_MS,
+} from "../models/user/user.model";
 
-dotenv.config({ path: "./env" });
+// NOTE: the path was "./env" (missing the leading dot), so this call silently
+// did nothing. Other modules load the real file, which masked the bug.
+dotenv.config({ path: "./.env" });
 
 type MulterRequest = Request & {
   files?: {
     [fieldname: string]: Express.Multer.File[];
   };
 };
+
+/**
+ * Pragmatic email check. Deliberately permissive — the real proof of ownership
+ * is the verification code, not a regex, so this only needs to catch obvious
+ * typos before we spend a Cloudinary upload and a Resend send on them.
+ */
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 interface TokenPayload extends JwtPayload {
   _id: string;
@@ -56,19 +75,57 @@ const registerUser: RequestHandler = asyncHandler(
         "All fields are compulsory - username, email, password",
       );
     }
+
+    // Normalise before the uniqueness check. The schema lowercases/trims on
+    // write, but the lookup used the raw input, so " Bob " and "bob" could
+    // both pass the check and then collide on the unique index.
+    const normalisedUsername = username.toLowerCase().trim();
+    const normalisedEmail = email.toLowerCase().trim();
+
+    // Validate the address before we spend a Cloudinary upload and a Resend
+    // send on data we already know we can't use.
+    if (!EMAIL_REGEX.test(normalisedEmail)) {
+      throw new ApiError(
+        400,
+        `"${normalisedEmail}" doesn't look like a valid email address.`,
+        [{ path: "email", message: "Enter a valid email address." }],
+      );
+    }
+
     const existedUser = await User.findOne({
-      $or: [{ username }, { email }],
+      $or: [{ username: normalisedUsername }, { email: normalisedEmail }],
     });
     if (existedUser) {
-      throw new ApiError(409, "User with this email already exists");
+      // Tell them WHICH field collided — "User with this email already
+      // exists" is wrong and confusing when they actually reused a username.
+      const isEmailTaken =
+        existedUser.email?.toLowerCase() === normalisedEmail;
+      const field = isEmailTaken ? "email address" : "username";
+      throw new ApiError(
+        409,
+        isEmailTaken
+          ? "An account with this email address already exists. Try logging in instead."
+          : `The username "${normalisedUsername}" is already taken. Pick another one.`,
+        [
+          {
+            path: isEmailTaken ? "email" : "username",
+            message: isEmailTaken
+              ? "This email address is already registered."
+              : "This username is already taken.",
+          },
+        ],
+      );
     }
 
     if (!multerReq.files?.avatar?.[0]?.path) {
-      throw new ApiError(400, "Profile picture file is required");
+      throw new ApiError(
+        400,
+        "Profile picture file is required",
+        [{ path: "avatar", message: "Choose a profile picture to continue." }],
+      );
     }
 
     const avatarLocalPath = multerReq.files.avatar[0].path;
-    //const coverImageLocalPath = req.files?.coverImage[0]?.path; //[0] is for first property
     if (!avatarLocalPath) {
       throw new ApiError(400, "Profile image isn't uploaded properly locally");
     }
@@ -82,33 +139,147 @@ const registerUser: RequestHandler = asyncHandler(
       );
     }
 
-    //console.log("req.files: ",req.files)
+    // `isEmailVerified: false` is set EXPLICITLY for new accounts. The schema
+    // field intentionally has no default, so accounts created before this
+    // feature have it absent and are grandfathered in by the login guard.
     const user = await User.create({
       avatar: avatarUploadedOnClodinary.url,
-      email,
+      email: normalisedEmail,
       password,
-      username: username.toLowerCase().trim(), // well i have alaready trimmed it
+      username: normalisedUsername,
+      isEmailVerified: false,
     });
-    const createdUserInMongoDB = await User.findById(user._id).select(
-      "-password -refreshToken",
-    ); //- sign means discard it " " means
-    if (!createdUserInMongoDB)
-      throw new ApiError(
-        500,
-        "Error with registering user in MongoDB, please try again",
-      );
 
-    return res
-      .status(201)
-      .json(
-        new ApiResponse(
-          200,
-          createdUserInMongoDB,
-          "User Registered succesfully",
-        ),
-      );
+    // Issue and email the verification code. The account already exists at
+    // this point, so a send failure must not roll registration back — we
+    // report `emailSent: false` and the client offers a resend instead.
+    const issued = await issueVerificationCode(
+      user._id.toString(),
+      normalisedEmail,
+      normalisedUsername,
+    );
+
+    return res.status(201).json(
+      new ApiResponse(
+        201,
+        {
+          requiresEmailVerification: true,
+          // Masked: the client only ever displays this, and a full address in
+          // an API response is one more place an address can leak.
+          email: maskEmail(normalisedEmail),
+          expiresInSeconds: Math.round(EMAIL_VERIFICATION_TTL_MS / 1000),
+          maxAttempts: EMAIL_VERIFICATION_MAX_ATTEMPTS,
+          emailSent: issued.ok,
+        },
+        issued.ok
+          ? "Account created. We've sent a verification code to your email."
+          : "Account created, but we couldn't send the verification email. Request a code to continue.",
+      ),
+    );
   },
 );
+
+/**
+ * Confirm an emailed code and flip the account to verified.
+ *
+ * Unauthenticated on purpose: the user has no tokens yet at this point. The
+ * email address plus the code are the credential.
+ */
+const verifyEmail: RequestHandler = asyncHandler(async (req, res) => {
+  const email = (req.body?.email || "").toString().trim();
+  const code = (req.body?.code || "").toString().trim();
+
+  if (!email || !code) {
+    throw new ApiError(
+      400,
+      "Enter both your email address and the verification code.",
+      [{ path: "code", message: "Enter the 6-digit code." }],
+    );
+  }
+
+  if (!/^\d{6}$/.test(code)) {
+    // Rejecting on shape (rather than bcrypt) keeps typos fast and avoids
+    // burning one of the user's five attempts on a 4-digit paste.
+    throw new ApiError(
+      400,
+      "The code is 6 digits. Please check and try again.",
+      [
+        {
+          path: "code",
+          message: "The code is 6 digits. Please check and try again.",
+        },
+      ],
+      "VERIFICATION_CODE_INVALID",
+    );
+  }
+
+  const result = await verifyEmailCode(email, code);
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        verified: true,
+        attemptsRemaining: result.attemptsRemaining,
+        attemptsUsed: result.attemptsUsed,
+      },
+      "Email verified. You can log in now.",
+    ),
+  );
+});
+
+/** Re-send (and re-key) the verification code. */
+const resendVerificationCode: RequestHandler = asyncHandler(async (req, res) => {
+  const email = (req.body?.email || "").toString().trim();
+  if (!email) {
+    throw new ApiError(400, "An email address is required to resend a code.");
+  }
+
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+  if (!user) {
+    throw new ApiError(
+      404,
+      "We couldn't find an account with that email address.",
+    );
+  }
+  if (user.isEmailVerified) {
+    throw new ApiError(409, "This email address is already verified.");
+  }
+
+  const result = await issueVerificationCode(
+    user._id.toString(),
+    user.email,
+    user.username,
+  );
+
+  if (result.rateLimited) {
+    throw new ApiError(
+      429,
+      `Please wait ${result.secondsUntilRetry} second${
+        result.secondsUntilRetry === 1 ? "" : "s"
+      } before requesting another code.`,
+      [],
+      "RATE_LIMITED",
+    );
+  }
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        emailSent: result.ok,
+        expiresInSeconds: Math.round(EMAIL_VERIFICATION_TTL_MS / 1000),
+        maxAttempts: EMAIL_VERIFICATION_MAX_ATTEMPTS,
+        cooldownSeconds: Math.round(
+          EMAIL_VERIFICATION_RESEND_COOLDOWN_MS / 1000,
+        ),
+      },
+      result.ok
+        ? "A new code is on its way. It expires in 10 minutes."
+        : "We couldn't send the email. Please try again in a moment.",
+    ),
+  );
+});
 
 const loginUser: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
@@ -135,13 +306,27 @@ const loginUser: RequestHandler = asyncHandler(
     if (!findUser) {
       throw new ApiError(
         404,
-        "This user doesn't exist with this email or username",
+        "No account exists with that email or username. Check for typos, or create an account if you don't have one yet.",
       );
     }
     const passwordValidity = await findUser.isPasswordCorrect(password);
     if (!passwordValidity) {
       throw new ApiError(401, "Invalid user credentials");
     }
+
+    // Guard rail: an account created since the Resend rollout must have
+    // confirmed it can receive mail before it can be used. Comparing strictly
+    // against `false` is deliberate — accounts created before this feature
+    // have `isEmailVerified === undefined` and must keep working untouched.
+    if (findUser.isEmailVerified === false) {
+      throw new ApiError(
+        403,
+        "Your email address isn't verified yet. Enter the code we emailed you to finish setting up your account.",
+        [{ path: "email", message: "Email address not verified yet." }],
+        "EMAIL_NOT_VERIFIED",
+      );
+    }
+
     const { refreshToken, accessToken } = await generateAccessAndRefreshTokens(
       findUser._id,
     );
@@ -420,6 +605,8 @@ const getUserProfile: RequestHandler = asyncHandler(
 export {
   generateAccessAndRefreshTokens,
   registerUser,
+  verifyEmail,
+  resendVerificationCode,
   loginUser,
   logoutUser,
   refreshAccessToken,

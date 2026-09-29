@@ -365,7 +365,7 @@ export const GroupCallProvider: React.FC<{ children: ReactNode }> = ({
       if (roomIdRef.current || socketRef.current?.connected) return;
       isCallInitiatorRef.current = isInitiator;
 
-      const token = LocalStorage.get("token") as string;
+      const token = LocalStorage.get<string>("token");
       const socket = socketio(getMediasoupURI(), {
         auth: { token },
         transports: ["websocket", "polling"],
@@ -583,6 +583,12 @@ export const GroupCallProvider: React.FC<{ children: ReactNode }> = ({
       } catch {
         // Socket may already be gone
       }
+    }
+    // Tell the server this participant is out. If they were the last one, the
+    // server writes the single call-log message for the whole call — one
+    // message per group call, no matter how many people came and went.
+    if (mainSocket && callRoomId) {
+      mainSocket.emit("group-call-member-left", { roomId: callRoomId });
     }
     // If the initiator is the only one in the call (nobody ever joined), tell
     // every member still holding the incoming popup that it's over, so nobody

@@ -8,6 +8,8 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { removeLocalFile } from "../utils/helper.js";
+import { chatMessageCommonAggregation } from "../utils/messageAggregation.js";
+import logger from "../logger/winston.logger.js";
 import { Request, RequestHandler, Response } from "express";
 import { uploadResultCloudinary } from "../utils/fileUploaderCloudinary.js";
 
@@ -24,37 +26,6 @@ type MulterRequest = Request & {
     [fieldname: string]: Express.Multer.File[];
   };
 };
-/**
- * @description Utility function which returns the pipeline stages to structure the chat message schema with common lookups
- * @returns {mongoose.PipelineStage[]}
- */
-const chatMessageCommonAggregation = () => {
-  return [
-    {
-      $lookup: {
-        from: "users",
-        foreignField: "_id",
-        localField: "sender",
-        as: "sender",
-        pipeline: [
-          {
-            $project: {
-              _id: 1,
-              username: 1,
-              avatar: 1,
-              email: 1,
-            },
-          },
-        ],
-      },
-    },
-    {
-      $addFields: {
-        sender: { $first: "$sender" },
-      },
-    },
-  ];
-};
 
 const getAllMessages: RequestHandler = asyncHandler(async (req, res) => {
   const { chatId } = req.params;
@@ -67,7 +38,10 @@ const getAllMessages: RequestHandler = asyncHandler(async (req, res) => {
 
   // Only send messages if the logged in user is a part of the chat he is requesting messages of
   if (!selectedChat.participants?.includes((req.user as any)._id)) {
-    throw new ApiError(400, "User is not a part of this chat");
+    throw new ApiError(
+      403,
+      "You are not a member of this chat, so you can't read its messages.",
+    );
   }
 
   const messages = await ChatMessage.aggregate([
@@ -147,7 +121,11 @@ const sendMessage: RequestHandler = asyncHandler(
               size: attachment.size,
             };
           } catch (error) {
-            console.error(`Upload failed for ${attachment.path}:`, error);
+            logger.error(
+              `Failed to upload attachment ${attachment.path}: ${
+                error instanceof Error ? error.message : "unknown error"
+              }`,
+            );
             throw error;
           }
         },
@@ -156,8 +134,6 @@ const sendMessage: RequestHandler = asyncHandler(
       // Wait for all uploads to complete
       const uploadedFiles: any = await Promise.all(uploadPromises);
       messageFiles.push(...uploadedFiles);
-
-      console.log(`Successfully uploaded ${messageFiles.length} files`);
     }
 
     // Create a new message instance with appropriate metadata
@@ -167,8 +143,6 @@ const sendMessage: RequestHandler = asyncHandler(
       chat: new mongoose.Types.ObjectId(chatId),
       attachments: messageFiles,
     });
-    console.log("Message created with ID:", message._id);
-
     // update the chat's last message which could be utilized to show last message in the list item
     const chat = await Chat.findByIdAndUpdate(
       chatId,
@@ -179,7 +153,6 @@ const sendMessage: RequestHandler = asyncHandler(
       },
       { new: true },
     );
-    console.log("Chat updated, fetching structured message...");
     // structure the message
     const messages = await ChatMessage.aggregate([
       {
@@ -192,28 +165,17 @@ const sendMessage: RequestHandler = asyncHandler(
 
     // Store the aggregation result
     const receivedMessage = messages[0];
-    console.log("Structured message:", receivedMessage ? "EXISTS" : "NULL");
 
     if (!receivedMessage) {
       throw new ApiError(500, "Internal server error");
     }
-    console.log("=== ABOUT TO EMIT SOCKET EVENTS ===");
-    console.log("Chat participants:", chat.participants);
 
     // logic to emit socket event about the new message created to the other participants
     chat.participants.forEach((participantObjectId: ObjectId) => {
-      console.log("Processing participant:", participantObjectId.toString());
-
+      // The sender already has this message optimistically in their UI.
       if (participantObjectId.toString() === (req.user as any)._id.toString()) {
-        console.log("Skipping sender (self)");
         return;
       }
-
-      console.log(
-        "Emitting to participant room:",
-        participantObjectId.toString(),
-      );
-      console.log("Event name:", ChatEventEnum.MESSAGE_RECEIVED_EVENT);
 
       emitSocketEvent(
         req,
@@ -221,14 +183,7 @@ const sendMessage: RequestHandler = asyncHandler(
         ChatEventEnum.MESSAGE_RECEIVED_EVENT,
         receivedMessage,
       );
-
-      console.log(
-        "Emission completed for participant:",
-        participantObjectId.toString(),
-      );
     });
-
-    console.log("=== ALL SOCKET EMISSIONS COMPLETED ===");
 
     return res
       .status(201)
@@ -266,15 +221,11 @@ const downloadAttachment: RequestHandler = asyncHandler(async (req, res) => {
       "User-Agent": "Mozilla/5.0 (compatible; ChatApp/1.0)",
     },
   });
-  console.log(
-    "[download-attachment] cloudinary",
-    response.status,
-    response.headers.get("content-type"),
-    "len=" + response.headers.get("content-length"),
-    url,
-  );
   if (!response.ok) {
-    throw new ApiError(502, "Could not fetch the file from storage");
+    throw new ApiError(
+      502,
+      "Could not fetch the file from storage. Please try downloading it again.",
+    );
   }
 
   const safeName = filename.replace(/[^\w.-]+/g, "_") || "download";
@@ -375,4 +326,123 @@ const deleteMessage: RequestHandler = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, message, "Message deleted successfully"));
 });
 
-export { getAllMessages, sendMessage, deleteMessage, downloadAttachment };
+/** The emojis offered in the reaction picker, in display order. */
+const ALLOWED_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥"] as const;
+
+const reactToMessage: RequestHandler = asyncHandler(async (req, res) => {
+  // Express types path params as `string | string[]`; the route only ever
+  // matches a single segment, so narrow once and reuse.
+  const chatId = String(req.params.chatId ?? "");
+  const messageId = String(req.params.messageId ?? "");
+  const emoji = (req.body?.emoji || "").toString().trim();
+  const userId = (req.user as any)._id;
+
+  if (!mongoose.isValidObjectId(chatId)) {
+    throw new ApiError(400, "That chat link is invalid.");
+  }
+  if (!mongoose.isValidObjectId(messageId)) {
+    throw new ApiError(400, "That message link is invalid.");
+  }
+
+  // A shortlist rather than an open door. Accepting arbitrary strings lets a
+  // client store megabytes of text in a field the UI renders as a chip, and
+  // lets someone push content that is not an emoji at all.
+  if (!(ALLOWED_REACTIONS as readonly string[]).includes(emoji)) {
+    throw new ApiError(
+      400,
+      "Pick one of the available reactions.",
+      [{ path: "emoji", message: "That reaction isn't available." }],
+    );
+  }
+
+  const chat = await Chat.findOne({
+    _id: new mongoose.Types.ObjectId(chatId),
+    participants: userId,
+  });
+  if (!chat) {
+    throw new ApiError(
+      403,
+      "You are not a member of this chat, so you can't react to its messages.",
+    );
+  }
+
+  const message = await ChatMessage.findOne({
+    _id: new mongoose.Types.ObjectId(messageId),
+    chat: new mongoose.Types.ObjectId(chatId),
+  });
+  if (!message) {
+    throw new ApiError(404, "That message no longer exists.");
+  }
+
+  // Toggle semantics, matching what people expect from WhatsApp:
+  //   same user, same emoji  -> remove the reaction
+  //   same user, new emoji   -> replace it
+  //   different user         -> add a new one (stacks in a group)
+  // The untyped model gives `any` here, so the callback params are declared
+  // to keep this file under `noImplicitAny`.
+  const isMine = (r: { user: unknown; emoji: string }) =>
+    String(r.user) === userId.toString();
+
+  const existing = (message.reactions as Array<{ user: unknown; emoji: string }>).find(isMine);
+  const isRemoving = existing?.emoji === emoji;
+
+  // In both branches this user's previous entry goes; the only difference is
+  // whether a new one is appended.
+  message.reactions = (message.reactions as Array<{ user: unknown }>).filter(
+    (r) => !isMine(r as { user: unknown; emoji: string }),
+  );
+  if (!isRemoving) {
+    message.reactions.push({
+      user: new mongoose.Types.ObjectId(userId),
+      emoji,
+    });
+  }
+  await message.save({ validateBeforeSave: false });
+
+  // Re-run the aggregation so the socket payload and the HTTP response have
+  // the same populated shape the initial message fetch produces. Without this
+  // the client receives raw ObjectIds and loses avatars on every update.
+  const [structured] = await ChatMessage.aggregate([
+    { $match: { _id: new mongoose.Types.ObjectId(messageId) } },
+    ...chatMessageCommonAggregation(),
+  ]);
+
+  chat.participants.forEach((participantObjectId: ObjectId) => {
+    if (participantObjectId.toString() === userId.toString()) return;
+    emitSocketEvent(
+      req,
+      participantObjectId.toString(),
+      ChatEventEnum.MESSAGE_REACTION_EVENT,
+      {
+        messageId: structured._id,
+        chatId: structured.chat,
+        reactions: structured.reactions,
+        // Who reacted last, so the client can attribute a "X reacted" hint
+        // without diffing the whole array.
+        updatedBy: structured.sender,
+      },
+    );
+  });
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        messageId: structured._id,
+        reactions: structured.reactions,
+        // Lets the originating client update its own bubble immediately
+        // rather than waiting for its own socket echo.
+        myReaction: isRemoving ? null : emoji,
+      },
+      isRemoving ? "Reaction removed" : "Reaction added",
+    ),
+  );
+});
+
+export {
+  getAllMessages,
+  sendMessage,
+  deleteMessage,
+  downloadAttachment,
+  reactToMessage,
+};

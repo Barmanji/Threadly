@@ -4,6 +4,18 @@ import { Server, Socket } from "socket.io";
 import { ChatEventEnum } from "../constants.js";
 import { User, IUser } from "../models/user/user.model.js";
 import { ApiError } from "../utils/ApiError.js";
+import {
+  endGroupCall,
+  endP2PCall,
+  finalizeCallsForUser,
+  markCallAnswered,
+  markGroupCallJoined,
+  markGroupCallLeft,
+  startGroupCall,
+  startP2PCall,
+  type CallType,
+} from "../services/callLog.service.js";
+import logger from "../logger/winston.logger.js";
 import type { Request } from "express";
 
 type AvailableChatEvents = (typeof ChatEventEnum)[keyof typeof ChatEventEnum];
@@ -132,10 +144,7 @@ const mountWhiteboardOpenCancelEvent = (socket: Socket): void => {
  * Initialize socket server
  */
 const initializeSocketIO = (io: Server) => {
-  console.log("io: ", io);
   return io.on("connection", async (rawSocket: Socket) => {
-    console.log("io2: ", io, "\n rawSoc: ", rawSocket);
-
     const socket = rawSocket as SocketWithUser;
     try {
       // parse the cookies from the handshake headers (This is only possible if client has `withCredentials: true`)
@@ -200,8 +209,8 @@ const initializeSocketIO = (io: Server) => {
         // each other) are allowed through so the client can resolve them.
         const calleeBusyWith = to ? activeCalls.get(to) : null;
         if (calleeBusyWith && calleeBusyWith !== senderId) {
-          console.log(
-            `[call-user] ${senderId} -> ${to} busy in call with ${calleeBusyWith}`,
+          logger.debug(
+            `[call-user] ${senderId} -> ${to} is already on a call with ${calleeBusyWith}`,
           );
           socket.emit("call-busy", {
             to,
@@ -215,6 +224,16 @@ const initializeSocketIO = (io: Server) => {
           return;
         }
         if (senderId) registerCall(senderId, to);
+        // Open a server-side call record. It is finalized when the call ends,
+        // is declined, or either side disconnects — see callLog.service.ts.
+        if (senderId) {
+          startP2PCall({
+            callerId: senderId,
+            calleeId: to,
+            chatId,
+            callType: callType as CallType,
+          });
+        }
         socket.to(to).emit("incomming-call", {
           from: socket.user?._id,
           fromUser: {
@@ -232,6 +251,8 @@ const initializeSocketIO = (io: Server) => {
         const { to, answer } = data;
         const senderId = socket.user?._id?.toString();
         if (senderId) registerCall(senderId, to);
+        // Start the duration clock. Whoever accepted is the one who joined.
+        if (senderId) markCallAnswered(senderId, to);
         socket.to(to).emit("call-accepted", {
           from: socket.user?._id,
           answer,
@@ -246,6 +267,13 @@ const initializeSocketIO = (io: Server) => {
         });
         if (senderId) {
           deregisterCall(senderId, to);
+          void endP2PCall({
+            a: senderId,
+            b: to,
+            endedBy: senderId,
+            rejected: true,
+            io,
+          });
         }
       });
 
@@ -276,12 +304,12 @@ const initializeSocketIO = (io: Server) => {
       socket.on("call-ended", (data) => {
         const { to } = data;
         const senderId = socket.user?._id?.toString();
-        console.log("[call-ended] emitted by:", senderId, "to:", to);
         socket.to(to).emit("call-ended", {
           from: socket.user?._id,
         });
         if (senderId) {
           deregisterCall(senderId, to);
+          void endP2PCall({ a: senderId, b: to, endedBy: senderId, io });
         }
       });
 
@@ -297,6 +325,16 @@ const initializeSocketIO = (io: Server) => {
       // Group call events
       socket.on("group-call-invite", (data) => {
         const { roomId, callType, participants } = data;
+        const senderId = socket.user?._id?.toString();
+        // Open the server-side record for this group call. It is finalized
+        // exactly once, no matter how many members join or leave.
+        if (senderId) {
+          startGroupCall({
+            roomId,
+            callType: callType as CallType,
+            initiatorId: senderId,
+          });
+        }
         // Broadcast the invitation to the whole chat room so EVERY member gets
         // notified (per-user targeting can silently miss peers). The sender is
         // excluded automatically by `socket.to(...)`.
@@ -329,6 +367,8 @@ const initializeSocketIO = (io: Server) => {
 
       socket.on("group-call-accepted", (data) => {
         const { roomId } = data;
+        const senderId = socket.user?._id?.toString();
+        if (senderId) markGroupCallJoined(roomId, senderId);
         socket.to(roomId).emit("group-call-participant-joined", {
           participantId: socket.user?._id,
         });
@@ -339,6 +379,16 @@ const initializeSocketIO = (io: Server) => {
         socket.to(roomId).emit("group-call-participant-rejected", {
           participantId: socket.user?._id,
         });
+      });
+
+      // A member hung up on purpose. This is the normal exit path (the
+      // `disconnect` handler only covers tab-close/crash), and it lets the
+      // server log the call as soon as the last participant walks out.
+      socket.on("group-call-member-left", (data) => {
+        const { roomId } = data;
+        const senderId = socket.user?._id?.toString();
+        if (!roomId || !senderId) return;
+        void markGroupCallLeft({ roomId, userId: senderId, io });
       });
 
       socket.on("group-call-media-state", (data) => {
@@ -353,9 +403,13 @@ const initializeSocketIO = (io: Server) => {
 
       socket.on("group-call-ended", (data) => {
         const { roomId } = data;
+        const senderId = socket.user?._id?.toString();
         socket.to(roomId).emit("group-call-ended", {
           endedBy: socket.user?._id,
         });
+        // One log for the whole call: whoever reports the end first claims the
+        // session, and any later report from another member is discarded.
+        if (senderId) void endGroupCall({ roomId, endedBy: senderId, io });
       });
 
       // The initiator cancelled/left the call before (or even after) people
@@ -364,6 +418,10 @@ const initializeSocketIO = (io: Server) => {
       socket.on("group-call-cancelled", (data) => {
         const { roomId, participants } = data;
         if (!roomId) return;
+        const senderId = socket.user?._id?.toString();
+        // The initiator abandoned the call. If people had already joined this
+        // resolves to a completed log; if nobody joined, to a cancelled one.
+        if (senderId) void endGroupCall({ roomId, endedBy: senderId, io });
         const payload = {
           roomId,
           cancelledBy: socket.user?._id,
@@ -384,21 +442,18 @@ const initializeSocketIO = (io: Server) => {
       });
 
       socket.on(ChatEventEnum.DISCONNECT_EVENT, () => {
-        console.log("user has disconnected 🚫. userId: " + socket.user?._id);
         if (socket.user?._id) {
           const userId = socket.user._id.toString();
           // If the user was in an active call, forcefully notify the peer so
           // their UI doesn't get stuck on the call screen.
           const peers = deregisterUserCalls(userId);
-          console.log(
-            "[disconnect] user:",
-            userId,
-            "was in active call, notifying:",
-            peers,
-          );
           peers.forEach((peerId) => {
             io.to(peerId).emit("call-ended", { from: userId });
           });
+          // Close out any call the user was in — 1:1 or a group they started
+          // — so a closed tab doesn't leave a call permanently "in progress".
+          // No-op if the client already reported the call ended.
+          void finalizeCallsForUser(userId, io);
           socket.leave(userId);
         }
       });
@@ -417,17 +472,10 @@ const emitSocketEvent = (
   event: AvailableChatEvents,
   payload: unknown,
 ): void => {
-  console.log("emitSocketEvent called with:", {
-    roomId,
-    event,
-    hasPayload: !!payload,
-    hasIO: !!req.app.get("io"),
-  });
-
   const io = req.app.get("io") as Server;
 
   if (!io) {
-    console.error("NO IO INSTANCE FOUND ON REQ.APP");
+    logger.error(`[socket] Cannot emit "${event}": no io instance on req.app`);
     return;
   }
 

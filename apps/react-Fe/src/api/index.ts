@@ -5,7 +5,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from "axios";
 import type { ChatListItemInterface, ChatMessageInterface } from "../interfaces/chat";
-import type { FreeAPISuccessResponseInterface, LoginResponseData } from "../interfaces/api";
+import type { FreeAPISuccessResponseInterface, LoginResponseData, RegisterResultData, ResendCodeResultData, VerifyEmailResultData } from "../interfaces/api";
 import type { UserInterface } from "../interfaces/user";
 import { LocalStorage } from "../utils";
 
@@ -30,7 +30,7 @@ const refreshClient = axios.create({
 apiClient.interceptors.request.use(
     function (config) {
         // Retrieve user token from local storage
-        const token = LocalStorage.get("token");
+        const token = LocalStorage.get<string>("token");
         // Set authorization header with bearer token
         config.headers.Authorization = `Bearer ${token}`;
         return config;
@@ -85,7 +85,7 @@ apiClient.interceptors.response.use(
                     "/user/refresh-token",
                     {
                         refreshToken:
-                            LocalStorage.get("refreshToken") ?? undefined,
+                            LocalStorage.get<string>("refreshToken") ?? undefined,
                     },
                 );
                 const { accessToken, refreshToken } = refreshResponse.data
@@ -126,12 +126,25 @@ const registerUser = (data: {
     username: string;
     password: string;
     avatar: File | null;
-}): Promise<ApiResponse<LoginResponseData>> => {
+}): Promise<ApiResponse<RegisterResultData>> => {
     return apiClient.post("/user/register", data, {
         headers: {
             "Content-Type": "multipart/form-data",
         },
     });
+};
+
+const verifyEmail = (data: {
+    email: string;
+    code: string;
+}): Promise<ApiResponse<VerifyEmailResultData>> => {
+    return apiClient.post("/user/verify-email", data);
+};
+
+const resendVerificationCode = (data: {
+    email: string;
+}): Promise<ApiResponse<ResendCodeResultData>> => {
+    return apiClient.post("/user/resend-verification", data);
 };
 
 const logoutUser = (): Promise<ApiResponse<LoginResponseData>> => {
@@ -224,6 +237,22 @@ const deleteMessage = (
     return apiClient.delete(`/messages/${chatId}/${messageId}`);
 };
 
+/**
+ * Add, change or remove a reaction.
+ *
+ * One endpoint for all three: the server decides based on what this user
+ * already reacted with, so the client doesn't have to duplicate the toggle
+ * rules. The response carries the full reaction list, which the caller
+ * applies to its own copy of the message.
+ */
+const reactToMessage = (
+    chatId: string,
+    messageId: string,
+    emoji: string,
+): Promise<ApiResponse<{ messageId: string; reactions: ChatMessageInterface["reactions"]; myReaction: string | null }>> => {
+    return apiClient.put(`/messages/${chatId}/${messageId}/reaction`, { emoji });
+};
+
 const getWhiteboard = (
     chatId: string,
 ): Promise<ApiResponse<{ whiteboard: { elements?: unknown[]; appState?: unknown } }>> => {
@@ -252,9 +281,12 @@ export {
     getWhiteboard,
     loginUser,
     logoutUser,
+    reactToMessage,
     registerUser,
     removeParticipantFromGroup,
+    resendVerificationCode,
     saveWhiteboardState,
     sendMessage,
     updateGroupName,
+    verifyEmail,
 };

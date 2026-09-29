@@ -176,7 +176,7 @@ const GroupChatDetailsModal: React.FC<{
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-screen max-w-2xl">
+                <Dialog.Panel className="pointer-events-auto w-full max-w-2xl">
                   <div className="flex h-full flex-col overflow-y-scroll bg-paper border-l-4 border-ink py-6 shadow-[8px_8px_0_0_var(--color-ink)]">
                     <div className="px-4 sm:px-6">
                       <div className="flex items-start justify-between">

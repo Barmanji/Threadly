@@ -48,6 +48,8 @@ jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
+swagger-output.json
+./swagger-output.json
 
 # TypeScript cache
 *.tsbuildinfo

@@ -1,80 +1,101 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import socketio from "socket.io-client";
 import { LocalStorage } from "../utils";
 import { useAuth } from "./AuthContext";
 
+type AppSocket = ReturnType<typeof socketio>;
+
 // Function to establish a socket connection with authorization token
 const getSocket = (token?: string | null) => {
-  const authToken = token ?? LocalStorage.get("token");
-  // TEST: Modified AI CODE STARTS HERE
+  const authToken = token ?? LocalStorage.get<string>("token");
   const socketURI = import.meta.env.VITE_SOCKET_URI;
-  console.log("Initializing socket...", {
-    uri: socketURI,
-    hasToken: !!authToken,
-  });
   if (!socketURI) {
-    console.error("Socket URI is missing in environment variables!");
+    console.error("[socket] VITE_SOCKET_URI is missing from the environment.");
   }
   return socketio(socketURI, {
-    // TEST: ENDS HERE
     withCredentials: true,
     auth: { token: authToken },
   });
 };
 
-// Create a context to hold the socket instance
-const SocketContext = createContext<{
-  socket: ReturnType<typeof socketio> | null;
-}>({
-  socket: null,
-});
+interface SocketContextValue {
+  /**
+   * The live socket, or `null` when there's no auth token.
+   *
+   * Deliberately derived with `useMemo` rather than stored in state behind a
+   * `useEffect`: the old version left `socket` null for the first render
+   * after login, so anything running on mount raced the effect and saw no
+   * socket. Deriving it makes the instance available immediately.
+   */
+  socket: AppSocket | null;
+  /** True once the socket has completed its handshake with the server. */
+  isConnected: boolean;
+}
 
-// Custom hook to access the socket instance from the context
+const SocketContext = createContext<SocketContextValue>({
+  socket: null,
+  isConnected: false,
+});
 const useSocket = () => useContext(SocketContext);
 
-// SocketProvider component to manage the socket instance and provide it through context
-const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
-  // State to store the socket instance
-  const [socket, setSocket] = useState<ReturnType<typeof socketio> | null>(
-    null,
-  );
+const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { token } = useAuth();
+  const [isConnected, setIsConnected] = useState(false);
 
-  // Initialize or re-initialize the socket connection when token changes.
-  // Only connect when there is a token: without one (login/register page),
-  // the backend rejects the handshake and the socketError handler below would
-  // otherwise reload the page in an infinite loop.
+  // Only connect when there is a token ... otherwise the backend rejects the
+  // handshake and the socketError handler below would reload the page in a loop.
+  const socket = useMemo<AppSocket | null>(
+    () => (token ? getSocket(token) : null),
+    [token],
+  );
+
+  // Track the connection state so consumers can wait for the handshake rather
+  // than guessing (or showing the user a "socket not available" toast).
   useEffect(() => {
-    if (!token) {
-      setSocket(null);
+    if (!socket) {
+      setIsConnected(false);
       return;
     }
-    const newSocket = getSocket(token);
-    setSocket(newSocket);
+
+    const handleConnect = () => setIsConnected(true);
+    const handleDisconnect = () => setIsConnected(false);
+
+    setIsConnected(socket.connected);
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+    };
+  }, [socket]);
+
+  // Tear the connection down when the token changes or we unmount.
+  useEffect(() => {
+    if (!socket) return;
     return () => {
       try {
-        newSocket.disconnect();
+        socket.removeAllListeners();
+        socket.disconnect();
       } catch {
-        // Ignore errors while disconnecting a stale socket
+        /* already torn down */
       }
     };
-  }, [token]);
+  }, [socket]);
 
-  // If the socket is rejected because of an invalid/expired token, log the user
-  // out and redirect to the login page (same behavior as the API interceptor).
-  // The redirect is skipped when there is nothing to log out of or we are
-  // already on the login page to avoid reload loops.
+  // socketError => hard logout + redirect to /login
   useEffect(() => {
     if (!socket) return;
     const handleSocketError = () => {
       if (!token) return;
       LocalStorage.clear();
-      if (
-        typeof window !== "undefined" &&
-        window.location.pathname !== "/login"
-      ) {
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
     };
@@ -84,12 +105,15 @@ const SocketProvider: React.FC<{ children: React.ReactNode }> = ({
     };
   }, [socket, token]);
 
+  const value = useMemo<SocketContextValue>(
+    () => ({ socket, isConnected }),
+    [socket, isConnected],
+  );
+
   return (
-    // Provide the socket instance through context to its children
-    <SocketContext.Provider value={{ socket }}>
-      {children}
-    </SocketContext.Provider>
+    <SocketContext.Provider value={value}>{children}</SocketContext.Provider>
   );
 };
 
 export { SocketProvider, useSocket };
+export type { AppSocket };
