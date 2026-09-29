@@ -14,11 +14,12 @@ A retro-themed real-time chat application with built-in 1:1 & group video/audio 
 - [Architecture](#architecture)
 - [Monorepo Structure](#monorepo-structure)
 - [Getting Started](#getting-started)
-- [Running the App](#running-the-app)
 - [Project Structure](#project-structure)
 - [API Endpoints](#api-endpoints)
 - [Socket Events](#socket-events)
 - [Deployment](#deployment)
+- [Future Improvements](#future-improvements)
+- [Tests](#tests)
 
 ---
 
@@ -34,15 +35,17 @@ Threadly is a full-stack monorepo built with Turborepo. It provides real-time me
 
 | Category | Details |
 |---|---|
-| **Auth** | Registration, login, JWT access/refresh token rotation, avatar upload |
-| **Messaging** | Real-time 1:1 & group chat, typing indicators, file/image/video/PDF attachments |
+| **Auth** | Registration, login, email OTP verification, JWT access/refresh token rotation, avatar upload |
+| **Messaging** | Real-time 1:1 & group chat, typing indicators, emoji reactions, file/image/video/PDF attachments |
 | **1:1 Calls** | WebRTC peer-to-peer audio & video calls with mute/camera toggle |
 | **Group Calls** | mediasoup SFU-based group audio & video for 3+ participants |
 | **Whiteboard** | Canvas-based collaborative whiteboard with pen, eraser, shapes, real-time sync & persistence |
 | **File Sharing** | Upload via Multer → Cloudinary, with backend-proxied downloads (SSRF protection) |
 | **Notifications** | Incoming call alerts with ring sounds, new message sounds |
 | **Groups** | Create/rename/delete groups, add/remove participants, admin controls |
-| **Call Logs** | Track audio/video call history (missed, answered) |
+| **Call Logs** | Every call is written into the conversation as a message, so the history accounts for the calls that happened in it |
+| **Theming** | Light/dark retro palette, persisted to `localStorage`, toggle on every page |
+| **Changelog** | Public `/changelog` page with v1 and v2 release notes, linked from the hero, auth screens and the chat sidebar |
 | **API Docs** | Swagger UI auto-generated from route definitions |
 
 ### Messaging
@@ -50,6 +53,7 @@ Threadly is a full-stack monorepo built with Turborepo. It provides real-time me
 Real-time 1:1 & group chat with typing indicators and rich attachments (images, videos, PDFs).
 
 ![InstantChat](apps/react-Fe/public/InstantChat.png)
+
 
 ### 1:1 Calls
 
@@ -90,6 +94,7 @@ Upload via Multer → Cloudinary, with backend-proxied downloads (SSRF protectio
 | **Group Calls** | mediasoup 3 SFU (server) + mediasoup-client (browser) |
 | **File Upload** | Multer (temp) → Cloudinary (cloud) |
 | **Validation** | express-validator |
+| **Email** | Resend (verification codes) |
 | **Rate Limiting** | express-rate-limit |
 | **Logging** | Winston + Morgan |
 | **HTTP Client** | Axios |
@@ -98,43 +103,25 @@ Upload via Multer → Cloudinary, with backend-proxied downloads (SSRF protectio
 
 ## Architecture
 
-### System Overview
+### Email verification Flow
+
+Registration emails a six-digit code through Resend, checked server-side. A wrong code is rejected rather than silently creating an account.
+
+Login refuses an unverified account with a `403 EMAIL_NOT_VERIFIED`, and the client moves to the code entry step. The check is `isEmailVerified === false` rather than a falsy test on purpose: accounts created before this feature have the field `undefined`, and they keep working untouched.
 
 ```mermaid
-graph TD
-    subgraph Client["Frontend — React + Vite"]
-        A[React App]
-        B[Socket.io Client]
-        C[mediasoup-client]
-        D[WebRTC PeerConnection]
-    end
-
-    subgraph Server["Backend — Express + Socket.io"]
-        E[REST API<br/>/api/v1]
-        F[Socket.io<br/>Main Namespace]
-        G[Socket.io<br/>/mediasoup Namespace]
-        H[Express Middleware]
-    end
-
-    subgraph External["External Services"]
-        I[(MongoDB)]
-        J[Cloudinary]
-        K[Google STUN]
-    end
-
-    A -->|HTTP| E
-    A --> B
-    A --> C
-    B --> F
-    C --> G
-    E --> I
-    E --> J
-    D --> K
-    G --> D
-    H --> E
-    H --> F
-
+flowchart TD
+    A["POST /user/register"] --> B["Account created<br/>isEmailVerified: false"]
+    B --> C["Resend emails a 6-digit code"]
+    C --> D["POST /user/verify-email"]
+    D --> E{"Code matches?"}
+    E -->|no| F["Reject, stay on the code step"]
+    E -->|yes| G["isEmailVerified: true"]
+    C -.->|"60s cooldown"| H["POST /user/resend-verification"]
+    H --> C
+    G --> I["Login now returns tokens"]
 ```
+
 
 ### Authentication Flow
 
@@ -148,6 +135,7 @@ sequenceDiagram
     API->>DB: Find user by username/email
     DB-->>API: User document
     API->>API: bcrypt.compare(password, hashedPassword)
+    API->>API: isEmailVerified === false? -> 403 EMAIL_NOT_VERIFIED
     API->>API: Generate access token (1d) + refresh token (10d)
     API->>DB: Save refreshToken to user document
     API-->>C: 200 + Set-Cookie (httpOnly: accessToken, refreshToken) + user object
@@ -279,6 +267,22 @@ flowchart LR
     F -->|load on open| A
 ```
 
+### Emoji reactions Flow
+
+```mermaid
+flowchart LR
+    A[Tap message] --> B[EmojiPicker]
+    B -->|"PUT reaction"| C[reactToMessage]
+    C --> D{"Already reacted<br/>with this emoji?"}
+    D -->|"same emoji, mine"| E[Remove my entry]
+    D -->|"different emoji"| F[Replace my entry]
+    D -->|"no entry"| G[Append my entry]
+    E --> H[Return full reaction list]
+    F --> H
+    G --> H
+    H -->|messageReacted over socket| I[Every participant re-renders chips]
+```
+
 ---
 
 ## Monorepo Structure
@@ -317,6 +321,7 @@ chatApp_monorepo/
 | **pnpm** | ≥ 12 | Package manager |
 | **MongoDB** | ≥ 6 | Database (local or Atlas) |
 | **Cloudinary** | — | File/image upload storage (free tier works) |
+| **Resend** | — | Sends the email verification code (see below) |
 
 ### 1. Clone & Install
 
@@ -337,8 +342,17 @@ cp apps/react-Fe/.env.example apps/react-Fe/.env
 
 See the `.env.example` files in each app for the full list of variables:
 
-- [`apps/http-server-Be/.env.example`](apps/http-server-Be/.env.example) — Backend (MongoDB, JWT secrets, Cloudinary, mediasoup)
+- [`apps/http-server-Be/.env.example`](apps/http-server-Be/.env.example) — Backend (MongoDB, JWT secrets, Cloudinary, mediasoup, Resend)
 - [`apps/react-Fe/.env.example`](apps/react-Fe/.env.example) — Frontend (API URL, Socket.io URL, mediasoup URL)
+
+Two variables decide whether email verification works at all:
+
+```bash
+RESEND_API=re_...                                  # https://resend.com/api-keys
+RESEND_FROM_EMAIL=Threadly <noreply@barmanji.com>
+```
+
+The `from` domain has to be verified in the Resend dashboard first. If it isn't, every send is rejected and no code ever arrives — the backend logs the reason and registration dead-ends at the code step. Existing accounts are unaffected either way, because the login check only rejects `isEmailVerified === false`.
 
 ### 3. Start MongoDB
 
@@ -402,7 +416,10 @@ src/
 │   ├── ApiError.ts                   # Custom error class
 │   ├── ApiResponse.ts                # Standardized responses
 │   ├── asyncHandler.ts              # Async error wrapper
-│   └── fileUploaderCloudinary.ts     # Cloudinary upload/delete
+│   ├── fileUploaderCloudinary.ts     # Cloudinary upload/delete
+│   ├── messageAggregation.ts         # Reactions/lastMessage re-aggregation
+│   ├── sendEmail.ts                  # Resend client for verification codes
+│   └── helper.ts                     # Shared small helpers
 ├── validators/                       # express-validator schemas
 └── logger/
     ├── winston.logger.ts             # File + console logging
@@ -415,11 +432,12 @@ src/
 src/
 ├── main.tsx                          # Entry point — provider tree
 ├── App.tsx                           # Route definitions
-├── index.css                         # Tailwind v4 theme, neo utilities, bg-doodle
+├── index.css                         # Tailwind v4 theme tokens, neo utilities, bg-doodle
 ├── api/index.ts                      # Axios client + all API functions
 ├── context/
-│   ├── AuthContext.tsx                # Auth state, login/logout
+│   ├── AuthContext.tsx                # Auth state, login/logout, OTP verification
 │   ├── SocketContext.tsx              # Socket.io connection
+│   ├── ThemeContext.tsx               # Light/dark theme, threadly-theme in localStorage
 │   ├── WebRTCContext.tsx              # 1:1 P2P calls, remote media state
 │   └── GroupCallContext.tsx           # mediasoup SFU group calls
 ├── config/webrtc.ts                  # STUN server config
@@ -429,8 +447,12 @@ src/
 │   ├── PrivateRoute.tsx              # Auth guard
 │   ├── PublicRoute.tsx               # Redirect if authenticated
 │   ├── RetroConfirm.tsx              # Confirmation dialog
+│   ├── ThemeToggle.tsx               # Light/dark switch
+│   ├── ChangelogLink.tsx             # Shared changelog button (lg/md/sm)
+│   ├── OtpInput.tsx                  # 6-digit code entry
+│   ├── FieldError.tsx                # Per-field validation message
 │   ├── landing/
-│   │   ├── HeroSection.tsx           # Hero with floating shapes
+│   │   ├── HeroSection.tsx           # Hero with floating shapes, theme toggle
 │   │   └── StackingCards.tsx         # Scroll-stacking feature cards
 │   ├── call/
 │   │   ├── CallModal.tsx             # 1:1 video/audio call UI
@@ -441,16 +463,31 @@ src/
 │       ├── AddChatModal.tsx          # Create 1:1 or group chat
 │       ├── ChatItem.tsx              # Chat list item
 │       ├── MessageItem.tsx           # Message bubble
+│       ├── MessageReactions.tsx      # Stacked reaction chips
+│       ├── EmojiPicker.tsx           # 269-emoji reaction picker
+│       ├── reactionEmojis.ts         # Emoji list
+│       ├── CallMessageBody.tsx       # Calls rendered in the transcript
 │       └── GroupChatDetailsModal.tsx # Group settings
 ├── pages/
 │   ├── landing.tsx                   # Landing page
 │   ├── chat.tsx                      # Main chat page (sidebar + messages)
 │   ├── login.tsx                     # Login form
-│   └── register.tsx                  # Register form
+│   ├── register.tsx                  # Register form + OTP verify step
+│   └── changelog.tsx                 # Public v1/v2 release notes
 └── utils/
     ├── index.ts                      # requestHandler, LocalStorage, downloadFile
     └── useVoiceActivity.ts           # Voice activity detection hook
 ```
+
+### Frontend routes
+
+| Path | Guard | Page |
+|---|---|---|
+| `/` | `PublicRoute` | Landing |
+| `/login` | `PublicRoute` | Login |
+| `/register` | `PublicRoute` | Register, then the OTP step |
+| `/changelog` | none | Changelog — open to signed-in and signed-out alike |
+| `/chat` | `PrivateRoute` | Chat |
 
 ---
 
@@ -463,7 +500,9 @@ All routes are prefixed with `/api/v1`.
 | Method | Endpoint | Description | Auth |
 |---|---|---|---|
 | POST | `/user/register` | Register new user | No |
-| POST | `/user/login` | Login | No |
+| POST | `/user/login` | Login (403 if email unverified) | No |
+| POST | `/user/verify-email` | Submit the emailed 6-digit code | No |
+| POST | `/user/resend-verification` | Resend the code (60s cooldown) | No |
 | POST | `/user/refresh-token` | Refresh JWT | No |
 | POST | `/user/logout` | Logout | Yes |
 | GET | `/user/current-user` | Get current user | Yes |
@@ -498,6 +537,9 @@ All routes are prefixed with `/api/v1`.
 | GET | `/messages/:chatId` | Get all messages | Yes |
 | POST | `/messages/:chatId` | Send message | Yes |
 | DELETE | `/messages/:chatId/:messageId` | Delete message | Yes |
+| PUT | `/messages/:chatId/:messageId/reaction` | Add, change or remove a reaction | Yes |
+
+One route covers all three reaction cases. Whether the call replaces or removes the caller's existing reaction is decided server-side from what they already reacted with, so the client can't get it wrong.
 
 ### Other
 
@@ -516,6 +558,7 @@ All routes are prefixed with `/api/v1`.
 | Event | Direction | Payload | Description |
 |---|---|---|---|
 | `message` | C↔S | `{chatId, content, attachments}` | Send/receive messages |
+| `messageReacted` | S→C | `{chatId, messageId, reactions, myReaction}` | Someone added, changed or removed a reaction |
 | `chatCreated` | S→C | `{chat}` | New chat notification |
 | `chatUpdated` | S→C | `{chat}` | Chat renamed/participants changed |
 | `typing` | C↔S | `{chatId, userId}` | User is typing |
@@ -607,8 +650,20 @@ An example nginx config is provided in `ngnix-conf/ngnix-prof.conf` (commented o
 - [ ] Push notifications (Firebase / OneSignal)
 - [ ] Docker Compose setup for one-command deployment
 - [ ] Redis for session store and Socket.io adapter (horizontal scaling)
-- [ ] Message reactions and replies
+- [ ] Threaded replies on top of reactions
 - [ ] Voice messages
+
+## Tests
+
+No test framework is wired up yet. The backend has two E2E scripts that run against the real Express app, Socket.io and Mongoose:
+
+```bash
+cd apps/http-server-Be
+RUN_E2E=1 node scripts/calls-e2e.mjs      # 38 assertions — call signalling, glare, lifecycle
+RUN_E2E=1 node scripts/reactions-e2e.mjs  # 39 assertions — reaction aggregation rules
+```
+
+Both **write to the database configured in `.env`** — they do not use a throwaway one. That is why they refuse to start without `RUN_E2E=1`. Point `MONGODB_LOCAL_URI` at a scratch instance before running them. `calls-e2e.mjs` also imports from `dist/`, so it needs a prior `pnpm --filter http-server-be build`.
 
 ---
 
