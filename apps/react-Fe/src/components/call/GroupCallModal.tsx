@@ -132,7 +132,13 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
   // expand back into the full call UI.
   if (isMinimized) {
     return (
-      <div className="fixed bottom-4 left-4 z-[60] w-[300px]">
+      // The composer is ~96px tall (16 top pad + ~60 input + 16 bottom pad +
+      // 4px border) and sits flush to the bottom, so `bottom-4` parked this
+      // card straight on top of it and made the conversation untypeable. The
+      // mobile offset clears the composer and its home-indicator inset; the
+      // card is then ~170px tall sitting in the message area, well below the
+      // chat header. `sm:bottom-4` leaves the desktop position untouched.
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+7rem)] left-4 z-[60] w-[300px] max-w-[calc(100vw-2rem)] sm:bottom-4">
         <div className="neo flex flex-col gap-3 bg-retro-yellow p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">

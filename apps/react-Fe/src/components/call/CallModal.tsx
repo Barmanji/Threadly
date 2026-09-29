@@ -561,116 +561,136 @@ const CallModal: React.FC<CallModalProps> = ({
       {/* Always-mounted whiteboard panel — hidden via CSS when not visible
           so socket listeners stay active and strokes are never lost. */}
       <div
-        className="flex w-full flex-col gap-0"
+        // A 400px panel left no room for the conversation on a phone — header
+        // plus panel plus composer filled the screen, so there was nothing to
+        // read or type into. Capping at 45vh keeps a usable slice of messages
+        // below the board; `sm:max-h-none` leaves the desktop panel alone, and
+        // the drag handle still resizes it either way.
+        className="flex max-h-[45vh] w-full flex-col gap-0 sm:max-h-none"
         style={{
           display: isVisible ? "flex" : "none",
           height: whiteboardHeight,
         }}
       >
-        <div className="flex min-h-0 flex-1 gap-0">
-          {/* Avatars column */}
-          <div className="flex w-48 flex-shrink-0 flex-col items-center justify-center gap-4 border-r-4 border-ink p-3">
-            {/* Remote */}
-            <div
-              className={classNames(
-                "relative rounded-full transition-transform duration-150",
-                remoteSpeaking ? "scale-110" : "",
-              )}
-            >
-              {avatarFailed || !remoteAvatar ? (
-                <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
-                  <UserCircleIcon className="h-12 w-12 text-ink" />
-                </div>
-              ) : (
-                <>
-                  {remoteSpeaking && (
-                    <span className="absolute inset-0 animate-ping rounded-full bg-retro-orange opacity-50" />
-                  )}
-                  <img
-                    src={remoteAvatar}
-                    alt={remoteName}
-                    onError={() => setAvatarFailed(true)}
-                    className={classNames(
-                      "relative h-16 w-16 rounded-full object-cover ring-[3px]",
-                      remoteSpeaking ? "ring-retro-orange" : "ring-ink",
-                    )}
-                  />
-                </>
-              )}
-            </div>
-            <p className="max-w-24 truncate text-center text-[10px] font-extrabold uppercase tracking-wider text-ink">
-              {remoteName || "..."}
-            </p>
-
-            {/* Local */}
-            <div
-              className={classNames(
-                "relative rounded-full transition-transform duration-150",
-                localSpeaking ? "scale-110" : "",
-              )}
-            >
-              {localAvatarFailed || !localAvatar ? (
-                <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
-                  <UserCircleIcon className="h-12 w-12 text-ink" />
-                </div>
-              ) : (
-                <>
-                  {localSpeaking && (
-                    <span className="absolute inset-0 animate-ping rounded-full bg-retro-yellow opacity-60" />
-                  )}
-                  <img
-                    src={localAvatar}
-                    alt="You"
-                    onError={() => setLocalAvatarFailed(true)}
-                    className={classNames(
-                      "relative h-16 w-16 rounded-full object-cover ring-[3px]",
-                      localSpeaking ? "ring-retro-orange" : "ring-ink",
-                    )}
-                  />
-                </>
-              )}
-            </div>
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink">
-              You{isMuted ? " (Muted)" : ""}
-            </p>
-          </div>
-
-          {/* Whiteboard panel */}
-          <div className="min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-0 sm:flex-row">
+          {/* Whiteboard panel — first on mobile so the board gets the full
+              width; `sm:order-2` slots it back between avatars and controls. */}
+          <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col sm:order-2">
             <Whiteboard
               chatId={chatId}
               onClose={() => setIsVisible(false)}
             />
           </div>
 
-          {/* Controls strip */}
-          <div className="flex w-14 flex-shrink-0 flex-col items-center justify-center gap-3 border-l-4 border-ink bg-cream p-2">
-            <button
-              onClick={toggleMute}
-              className={classNames(
-                "neo-sm neo-press rounded-full p-2 transition",
-                isMuted
-                  ? "bg-retro-red text-paper"
-                  : "bg-paper text-ink hover:bg-retro-yellow",
-              )}
-              title={isMuted ? "Unmute" : "Mute"}
-            >
-              <MicrophoneIcon className="h-4 w-4" />
-            </button>
-            <button
-              onClick={toggleWhiteboard}
-              className="neo-sm neo-press rounded-full bg-retro-yellow p-2 text-ink transition hover:bg-retro-orange hover:text-paper"
-              title="Close whiteboard"
-            >
-              <ArrowsPointingInIcon className="h-4 w-4" />
-            </button>
-            <button
-              onClick={endCall}
-              className="neo-sm neo-press rounded-full bg-retro-red p-2 text-paper transition hover:bg-ink"
-              title="End call"
-            >
-              <PhoneXMarkIcon className="h-4 w-4" />
-            </button>
+          {/* Faces and controls share a row on mobile. `sm:contents` removes
+              this wrapper on desktop so both become plain flex items of the row
+              above, leaving that layout byte-identical. */}
+          <div className="order-2 flex min-h-0 flex-row sm:contents">
+            {/* Avatars — a horizontal pair on mobile, the original column from
+                `sm` up. The 192px column left the board ~127px wide on a phone.
+                `sm:flex-none` restores `flex: 0 0 auto`: the mobile `flex-1`
+                would otherwise set `flex-basis: 0%`, which overrides `w-48`
+                and lets this column grow into the board. */}
+            <div className="flex min-w-0 flex-1 items-center justify-center gap-4 border-r-4 border-ink p-2 sm:w-48 sm:flex-none sm:flex-col sm:gap-4 sm:p-3">
+              {/* Remote */}
+              <div className="flex min-w-0 items-center gap-2 sm:contents">
+                <div
+                  className={classNames(
+                    "relative rounded-full transition-transform duration-150",
+                    remoteSpeaking ? "scale-110" : "",
+                  )}
+                >
+                  {avatarFailed || !remoteAvatar ? (
+                    <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
+                      <UserCircleIcon className="h-12 w-12 text-ink" />
+                    </div>
+                  ) : (
+                    <>
+                      {remoteSpeaking && (
+                        <span className="absolute inset-0 animate-ping rounded-full bg-retro-orange opacity-50" />
+                      )}
+                      <img
+                        src={remoteAvatar}
+                        alt={remoteName}
+                        onError={() => setAvatarFailed(true)}
+                        className={classNames(
+                          "relative h-16 w-16 rounded-full object-cover ring-[3px]",
+                          remoteSpeaking ? "ring-retro-orange" : "ring-ink",
+                        )}
+                      />
+                    </>
+                  )}
+                </div>
+                <p className="max-w-24 truncate text-center text-[10px] font-extrabold uppercase tracking-wider text-ink">
+                  {remoteName || "..."}
+                </p>
+              </div>
+
+              {/* Local */}
+              <div className="flex min-w-0 items-center gap-2 sm:contents">
+                <div
+                  className={classNames(
+                    "relative rounded-full transition-transform duration-150",
+                    localSpeaking ? "scale-110" : "",
+                  )}
+                >
+                  {localAvatarFailed || !localAvatar ? (
+                    <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
+                      <UserCircleIcon className="h-12 w-12 text-ink" />
+                    </div>
+                  ) : (
+                    <>
+                      {localSpeaking && (
+                        <span className="absolute inset-0 animate-ping rounded-full bg-retro-yellow opacity-60" />
+                      )}
+                      <img
+                        src={localAvatar}
+                        alt="You"
+                        onError={() => setLocalAvatarFailed(true)}
+                        className={classNames(
+                          "relative h-16 w-16 rounded-full object-cover ring-[3px]",
+                          localSpeaking ? "ring-retro-orange" : "ring-ink",
+                        )}
+                      />
+                    </>
+                  )}
+                </div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink">
+                  You{isMuted ? " (Muted)" : ""}
+                </p>
+              </div>
+            </div>
+
+            {/* Controls strip. The avatars' right border separates them on mobile,
+                so the left border is only needed in the desktop column layout. */}
+            <div className="flex w-14 flex-shrink-0 flex-col items-center justify-center gap-3 bg-cream p-2 sm:border-l-4 sm:border-ink">
+              <button
+                onClick={toggleMute}
+                className={classNames(
+                  "neo-sm neo-press rounded-full p-2 transition",
+                  isMuted
+                    ? "bg-retro-red text-paper"
+                    : "bg-paper text-ink hover:bg-retro-yellow",
+                )}
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                <MicrophoneIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={toggleWhiteboard}
+                className="neo-sm neo-press rounded-full bg-retro-yellow p-2 text-ink transition hover:bg-retro-orange hover:text-paper"
+                title="Close whiteboard"
+              >
+                <ArrowsPointingInIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={endCall}
+                className="neo-sm neo-press rounded-full bg-retro-red p-2 text-paper transition hover:bg-ink"
+                title="End call"
+              >
+                <PhoneXMarkIcon className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 
