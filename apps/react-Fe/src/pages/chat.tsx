@@ -940,8 +940,8 @@ const ChatPage = () => {
           )}
           style={isMobile ? undefined : { width: sidebarWidth }}
         >
-          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col justify-between items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
-            <div className="flex items-center justify-between gap-2 sm:justify-start">
+          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col items-stretch gap-3">
+            <div className="flex items-center justify-start gap-2">
               <button
                 type="button"
                 className="neo neo-press inline-flex h-12 flex-shrink-0 items-center justify-center whitespace-nowrap bg-retro-red px-4 text-xs font-extrabold uppercase tracking-wide text-paper focus:outline-none sm:h-14 sm:px-5 sm:text-sm"

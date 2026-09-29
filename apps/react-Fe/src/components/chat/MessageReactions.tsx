@@ -1,8 +1,8 @@
-import { PlusIcon, XMarkIcon } from "@heroicons/react/20/solid";
-import { useEffect, useRef, useState } from "react";
+import { FaceSmileIcon, PlusIcon, XMarkIcon } from "@heroicons/react/20/solid";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { MessageReactionInterface } from "../../interfaces/chat";
 import { classNames } from "../../utils";
-import EmojiPicker from "./EmojiPicker";
 import { QUICK_REACTIONS } from "./reactionEmojis";
 
 interface ReactionGroup {
@@ -49,103 +49,170 @@ export const groupReactions = (
   return [...groups.values()];
 };
 
-interface ReactionPickerProps {
-  onReact: (emoji: string) => void;
-  /** The current user's existing reaction, highlighted in the picker. */
-  myReaction: string | null;
-  disabled?: boolean;
-}
+const POPOVER_WIDTH = 264;
+const VIEWPORT_MARGIN = 8;
 
 /**
- * The quick reaction row, plus the full picker behind a "+".
+ * The reaction picker popover: the quick row plus a "+" into the full picker.
  *
- * This is the hover toolbar that floats over a bubble — it is not rendered
- * inline in the message footer, because a permanently-visible smiley button on
- * every message is noise. See `MessageItem` for the hover wiring.
+ * Portaled to <body> with `position: fixed`, because the message list is
+ * `overflow-y-auto` and an in-place popover anchored near the top of the
+ * viewport gets clipped.
  */
-const ReactionPicker: React.FC<ReactionPickerProps> = ({
-  onReact,
-  myReaction,
-  disabled,
-}) => {
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+const ReactionPickerPopover: React.FC<{
+  anchor: HTMLElement;
+  onReact: (emoji: string) => void;
+  onClose: () => void;
+  myReaction: string | null;
+  onMore: (e: React.MouseEvent<HTMLButtonElement>) => void;
+}> = ({ anchor, onReact, onClose, myReaction, onMore }) => {
+  const [coords, setCoords] = useState<{ left: number; top: number } | null>(
+    null,
+  );
+  const panelRef = useRef<HTMLDivElement>(null);
 
-  // Close the full picker on an outside click or Escape. The quick row itself
-  // is a hover surface and closes on mouse-out; the picker is a dialog and
-  // needs an explicit way out.
+  useLayoutEffect(() => {
+    const place = () => {
+      const rect = anchor.getBoundingClientRect();
+      const panel = panelRef.current;
+      const height = panel?.offsetHeight ?? 48;
+
+      // Centre on the trigger, then clamp so it never leaves the viewport.
+      let left = rect.left + rect.width / 2 - POPOVER_WIDTH / 2;
+      let top = rect.top - height - VIEWPORT_MARGIN;
+      if (top < VIEWPORT_MARGIN) top = rect.bottom + VIEWPORT_MARGIN;
+
+      left = Math.max(
+        VIEWPORT_MARGIN,
+        Math.min(left, window.innerWidth - POPOVER_WIDTH - VIEWPORT_MARGIN),
+      );
+
+      setCoords({ left, top });
+    };
+
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [anchor]);
+
   useEffect(() => {
-    if (!pickerOpen) return;
-
     const onPointerDown = (e: PointerEvent) => {
-      if (wrapRef.current?.contains(e.target as Node)) return;
-      setPickerOpen(false);
+      if (panelRef.current?.contains(e.target as Node)) return;
+      if (anchor.contains(e.target as Node)) return;
+      onClose();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setPickerOpen(false);
+      if (e.key === "Escape") onClose();
     };
-
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [pickerOpen]);
+  }, [anchor, onClose]);
 
-  const togglePicker = (e: React.MouseEvent<HTMLButtonElement>) => {
-    // Remember the trigger so the picker can position against it.
-    setAnchor(e.currentTarget);
-    setPickerOpen((prev) => !prev);
-  };
+  return createPortal(
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-label="React to this message"
+      className="neo-sm fixed z-[100] flex items-center gap-0.5 bg-paper p-1"
+      style={{
+        width: POPOVER_WIDTH,
+        ...(coords ?? { left: -9999, top: -9999 }),
+      }}
+    >
+      {QUICK_REACTIONS.map((emoji) => (
+        <button
+          key={emoji}
+          type="button"
+          title={`React with ${emoji}`}
+          onClick={() => {
+            onReact(emoji);
+            onClose();
+          }}
+          className={classNames(
+            "flex h-8 w-8 items-center justify-center rounded-sm text-lg transition-transform hover:scale-125 focus:scale-125 focus:outline-none",
+            myReaction === emoji ? "bg-retro-yellow" : "",
+          )}
+        >
+          {emoji}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onMore}
+        aria-label="More emoji"
+        title="More emoji"
+        className="flex h-8 w-8 items-center justify-center rounded-sm text-ink/50 transition-colors hover:bg-ink/10 hover:text-ink"
+      >
+        <PlusIcon className="h-4 w-4" />
+      </button>
+    </div>,
+    document.body,
+  );
+};
+
+interface ReactionTriggerProps {
+  onReact: (emoji: string) => void;
+  /** The current user's existing reaction, highlighted in the picker. */
+  myReaction: string | null;
+  disabled?: boolean;
+  /** Opens the full emoji picker instead of the quick row. */
+  onMore: (e: React.MouseEvent<HTMLButtonElement>) => void;
+}
+
+/**
+ * The single grey smiley that appears beside a bubble on hover, or on tap for
+ * touch devices which have no hover.
+ *
+ * One icon rather than the whole quick row: a row of seven emoji floating next
+ * to every message was noise, and it was wide enough to overflow on a phone.
+ * The quick row lives behind this, the way WhatsApp does it.
+ */
+export const ReactionTrigger: React.FC<ReactionTriggerProps> = ({
+  onReact,
+  myReaction,
+  disabled,
+  onMore,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
 
   return (
-    <div ref={wrapRef} className="relative">
-      <div
-        className={classNames(
-          "neo-sm flex items-center gap-0.5 bg-paper p-1",
-          disabled ? "pointer-events-none opacity-50" : "",
-        )}
+    <>
+      <button
+        ref={setAnchor}
+        type="button"
+        aria-label="React to this message"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={(e) => {
+          // Keep it from reaching the bubble's own tap handler, which would
+          // toggle the toolbar shut again.
+          e.stopPropagation();
+          setOpen((prev) => !prev);
+        }}
+        className="flex h-7 w-7 items-center justify-center rounded-full bg-ink/5 text-ink/40 transition-colors hover:bg-ink/10 hover:text-ink"
       >
-        {QUICK_REACTIONS.map((emoji) => (
-          <button
-            key={emoji}
-            type="button"
-            title={`React with ${emoji}`}
-            onClick={() => onReact(emoji)}
-            className={classNames(
-              "flex h-7 w-7 items-center justify-center rounded-sm text-base transition-transform hover:scale-125 focus:scale-125 focus:outline-none",
-              myReaction === emoji ? "bg-retro-yellow" : "",
-            )}
-          >
-            {emoji}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={togglePicker}
-          aria-label="More emoji"
-          aria-expanded={pickerOpen}
-          title="More emoji"
-          className="flex h-7 w-7 items-center justify-center rounded-sm text-ink/50 transition-colors hover:bg-ink/10 hover:text-ink"
-        >
-          <PlusIcon className="h-4 w-4" />
-        </button>
-      </div>
+        <FaceSmileIcon className="h-4 w-4" />
+      </button>
 
-      {pickerOpen && anchor ? (
-        <EmojiPicker
+      {open && anchor ? (
+        <ReactionPickerPopover
           anchor={anchor}
-          onClose={() => setPickerOpen(false)}
-          onPick={(emoji) => {
-            onReact(emoji);
-            setPickerOpen(false);
-          }}
+          onClose={() => setOpen(false)}
+          onReact={onReact}
           myReaction={myReaction}
+          onMore={onMore}
         />
       ) : null}
-    </div>
+    </>
   );
 };
 
@@ -220,4 +287,4 @@ export const ReactionChips: React.FC<ReactionChipsProps> = ({
   );
 };
 
-export default ReactionPicker;
+export default ReactionTrigger;

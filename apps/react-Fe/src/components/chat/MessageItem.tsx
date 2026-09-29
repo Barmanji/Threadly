@@ -13,7 +13,12 @@ import type { ChatMessageInterface } from "../../interfaces/chat";
 import { classNames, formatBytes, getFileKind, downloadFile } from "../../utils";
 import RetroConfirm from "../RetroConfirm";
 import CallMessageBody from "./CallMessageBody";
-import ReactionPicker, { ReactionChips, groupReactions } from "./MessageReactions";
+import EmojiPicker from "./EmojiPicker";
+import {
+  ReactionChips,
+  ReactionTrigger,
+  groupReactions,
+} from "./MessageReactions";
 
 const MessageItem: React.FC<{
     isOwnMessage?: boolean;
@@ -41,6 +46,15 @@ const MessageItem: React.FC<{
     // `group-hover` — a tap on the bubble toggles it instead.
     const [touchOpen, setTouchOpen] = useState(false);
     const wrapRef = useRef<HTMLDivElement>(null);
+
+    // The full emoji picker, opened from the trigger's "+".
+    const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+    const [emojiAnchor, setEmojiAnchor] = useState<HTMLButtonElement | null>(null);
+
+    const openEmojiPicker = (e: React.MouseEvent<HTMLButtonElement>) => {
+      setEmojiAnchor(e.currentTarget);
+      setEmojiPickerOpen(true);
+    };
 
     const handleBubbleTap = () => {
         // `(hover: none)` is the reliable signal for "this device taps rather
@@ -119,7 +133,7 @@ const MessageItem: React.FC<{
                 className={classNames(
                     // `group` wraps both the bubble and the reaction toolbar, so
                     // hovering either one reveals the other.
-                    "group relative flex justify-start items-end gap-3 max-w-lg",
+                    "group relative flex w-full max-w-lg justify-start items-end gap-3",
                     isOwnMessage ? "ml-auto flex-row-reverse" : "",
                 )}
             >
@@ -129,7 +143,7 @@ const MessageItem: React.FC<{
                 />
                 <div
                     className={classNames(
-                        "relative p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
+                        "relative min-w-0 p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
                         isOwnMessage
                             ? "rounded-tr-none bg-retro-orange pr-10"
                             : "rounded-tl-none bg-paper",
@@ -281,7 +295,7 @@ const MessageItem: React.FC<{
                         <CallMessageBody call={message.call} />
                     ) : message.content ? (
                         <div className="relative flex justify-between">
-                            <p className="text-sm text-ink">{message.content}</p>
+                            <p className="text-sm text-ink break-words">{message.content}</p>
                         </div>
                     ) : null}
                     {/* Stacked reaction chips, sitting on the bubble's bottom
@@ -334,24 +348,40 @@ const MessageItem: React.FC<{
                         // toggle the toolbar shut again.
                         onClick={(e) => e.stopPropagation()}
                         className={classNames(
-                            // Centred on the bubble's outer edge rather than
-                            // floating above it — `-top-3` sat above the message
-                            // and read as detached from it.
+                            // Vertically centred on the bubble and tucked against
+                            // its outer edge — left for own messages, right for
+                            // received ones, so it reads as attached to the
+                            // message rather than floating near it.
                             "absolute top-1/2 z-40 -translate-y-1/2 transition-opacity duration-100",
-                            isOwnMessage ? "left-0" : "right-0",
+                            isOwnMessage ? "-left-2" : "-right-2",
                             "pointer-events-none opacity-0",
                             "group-hover:pointer-events-auto group-hover:opacity-100",
                             "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
                             touchOpen ? "pointer-events-auto opacity-100" : "",
                         )}
                     >
-                        <ReactionPicker
+                        <ReactionTrigger
                             onReact={handleReact}
                             myReaction={myReaction}
+                            onMore={openEmojiPicker}
                         />
                     </div>
                 ) : null}
             </div>
+
+            {/* The full picker, opened from the trigger's "+". Portaled, so the
+                scrollable message list cannot clip it. */}
+            {emojiPickerOpen && emojiAnchor ? (
+                <EmojiPicker
+                    anchor={emojiAnchor}
+                    onClose={() => setEmojiPickerOpen(false)}
+                    onPick={(emoji) => {
+                        handleReact(emoji);
+                        setEmojiPickerOpen(false);
+                    }}
+                    myReaction={myReaction}
+                />
+            ) : null}
 
             <RetroConfirm
                 open={confirmDeleteMessage}
