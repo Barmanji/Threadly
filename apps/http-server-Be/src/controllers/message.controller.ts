@@ -8,6 +8,7 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { removeLocalFile } from "../utils/helper.js";
+import { chatMessageCommonAggregation } from "../utils/messageAggregation.js";
 import logger from "../logger/winston.logger.js";
 import { Request, RequestHandler, Response } from "express";
 import { uploadResultCloudinary } from "../utils/fileUploaderCloudinary.js";
@@ -24,90 +25,6 @@ type MulterRequest = Request & {
   files?: {
     [fieldname: string]: Express.Multer.File[];
   };
-};
-/**
- * @description Utility function which returns the pipeline stages to structure the chat message schema with common lookups
- * @returns {mongoose.PipelineStage[]}
- */
-const chatMessageCommonAggregation = () => {
-  return [
-    {
-      $lookup: {
-        from: "users",
-        foreignField: "_id",
-        localField: "sender",
-        as: "sender",
-        pipeline: [
-          {
-            $project: {
-              _id: 1,
-              username: 1,
-              avatar: 1,
-              email: 1,
-            },
-          },
-        ],
-      },
-    },
-    {
-      $addFields: {
-        sender: { $first: "$sender" },
-      },
-    },
-    // Resolve the reactor on each reaction so the client can render avatars
-    // and "who reacted" without a second round trip. Only the fields the UI
-    // needs are projected — an email address has no business riding along
-    // inside a reaction chip.
-    //
-    // The original array has to be stashed first: a `$lookup` on an array
-    // `localField` *replaces* it with the resolved users, dropping the emoji
-    // that was stored alongside each id.
-    {
-      $set: { storedReactions: { $ifNull: ["$reactions", []] } },
-    },
-    {
-      $lookup: {
-        from: "users",
-        foreignField: "_id",
-        localField: "storedReactions.user",
-        as: "resolvedReactors",
-        pipeline: [
-          { $project: { _id: 1, username: 1, avatar: 1 } },
-        ],
-      },
-    },
-    {
-      $set: {
-        reactions: {
-          $map: {
-            input: "$storedReactions",
-            as: "reaction",
-            in: {
-              $mergeObjects: [
-                "$$reaction",
-                // Pair by id, not by position. `$lookup` silently omits users
-                // that no longer exist, so positional pairing would shift
-                // every subsequent emoji onto the wrong person. `$first` of
-                // an empty match is null and `$mergeObjects` ignores it, so a
-                // reaction from a deleted user keeps just its raw id.
-                {
-                  $first: {
-                    $filter: {
-                      input: { $ifNull: ["$resolvedReactors", []] },
-                      as: "reactor",
-                      cond: { $eq: ["$$reactor._id", "$$reaction.user"] },
-                    },
-                  },
-                },
-              ],
-            },
-          },
-        },
-      },
-    },
-    // Drop the scratch fields so they never reach the client.
-    { $unset: ["storedReactions", "resolvedReactors"] },
-  ];
 };
 
 const getAllMessages: RequestHandler = asyncHandler(async (req, res) => {

@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import type { ChatMessageInterface } from "../../interfaces/chat";
 import { classNames, formatBytes, getFileKind, downloadFile } from "../../utils";
 import RetroConfirm from "../RetroConfirm";
+import CallMessageBody from "./CallMessageBody";
 import ReactionPicker, { ReactionChips, groupReactions } from "./MessageReactions";
 
 const MessageItem: React.FC<{
@@ -247,7 +248,9 @@ const MessageItem: React.FC<{
                             </div>
                         </div>
                     ) : null}
-                    {message.content ? (
+                    {message.type === "call" && message.call ? (
+                        <CallMessageBody call={message.call} />
+                    ) : message.content ? (
                         <div className="relative flex justify-between">
                             <p className="text-sm text-ink">{message.content}</p>
                         </div>

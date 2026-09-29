@@ -170,6 +170,21 @@ export const formatBytes = (bytes?: number) => {
   return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 };
 
+/**
+ * "45s", "2m 05s", "1h 03m" — how a phone shows a call duration.
+ * Clamped at zero so a clock skew between client and server can't render a
+ * negative duration.
+ */
+export const formatDuration = (seconds?: number) => {
+  const total = Math.max(0, Math.floor(seconds ?? 0));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60)
+    return `${minutes}m ${String(total % 60).padStart(2, "0")}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+};
+
 // Real download instead of an <a download> link. The download attribute is
 // ignored for cross-origin resources (e.g. Cloudinary), which makes the
 // browser navigate to the object-storage page instead of downloading. We

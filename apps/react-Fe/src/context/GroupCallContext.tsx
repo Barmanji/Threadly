@@ -584,6 +584,12 @@ export const GroupCallProvider: React.FC<{ children: ReactNode }> = ({
         // Socket may already be gone
       }
     }
+    // Tell the server this participant is out. If they were the last one, the
+    // server writes the single call-log message for the whole call — one
+    // message per group call, no matter how many people came and went.
+    if (mainSocket && callRoomId) {
+      mainSocket.emit("group-call-member-left", { roomId: callRoomId });
+    }
     // If the initiator is the only one in the call (nobody ever joined), tell
     // every member still holding the incoming popup that it's over, so nobody
     // accepts into a dead/void room. If others have joined, it's just a normal

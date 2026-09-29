@@ -41,8 +41,8 @@ const getUserCallLogs: RequestHandler = asyncHandler(async (req: Request, res: R
     const logs = await CallLog.find({
         $or: [{ caller: userId }, { receiver: userId }],
     })
-    .populate("caller", "username profilePicture")
-    .populate("receiver", "username profilePicture")
+    .populate("caller", "username avatar")
+    .populate("receiver", "username avatar")
     .sort({ timestamp: -1 });
 
     res.status(200).json(new ApiResponse(200, logs));
@@ -54,8 +54,8 @@ const getCallLogById: RequestHandler = asyncHandler(async (req: Request, res: Re
     if (!isValidObjectId(logId)) throw new ApiError(400, "Invalid call log ID");
 
     const log = await CallLog.findById(logId)
-        .populate("caller", "username profilePicture")
-        .populate("receiver", "username profilePicture");
+        .populate("caller", "username avatar")
+        .populate("receiver", "username avatar");
 
     if (!log) throw new ApiError(404, "Call log not found");
 
