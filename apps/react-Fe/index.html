@@ -9,16 +9,19 @@
       // Apply the stored theme before the first paint.
       //
       // React can't do this: the class has to be on <html> while the document
-      // is still being parsed, otherwise a dark-mode visitor gets a full cream
-      // flash before the app mounts. The same logic lives in
+      // is still being parsed, otherwise a returning visitor gets a full flash
+      // of the wrong theme before the app mounts. The same logic lives in
       // src/context/ThemeContext.tsx — keep the storage key in sync.
+      //
+      // Light unless stored. Deliberately not `prefers-color-scheme`: following
+      // the OS handed every dark-mode-system visitor a dark app whether they
+      // wanted one or not.
       (function () {
         try {
           var stored = localStorage.getItem("threadly-theme");
-          var isDark = stored
-            ? stored === "dark"
-            : window.matchMedia("(prefers-color-scheme: dark)").matches;
-          if (isDark) document.documentElement.classList.add("dark");
+          if (stored === "dark") {
+            document.documentElement.classList.add("dark");
+          }
         } catch (e) {
           // Private mode / storage disabled — the default light theme is fine.
         }

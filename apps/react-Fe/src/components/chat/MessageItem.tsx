@@ -8,7 +8,7 @@ import {
     XMarkIcon,
 } from "@heroicons/react/20/solid";
 import moment from "moment";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatMessageInterface } from "../../interfaces/chat";
 import { classNames, formatBytes, getFileKind, downloadFile } from "../../utils";
 import RetroConfirm from "../RetroConfirm";
@@ -36,6 +36,31 @@ const MessageItem: React.FC<{
     const [openOptions, setopenOptions] = useState<boolean>(false);
     const [confirmDeleteMessage, setConfirmDeleteMessage] =
         useState<boolean>(false);
+
+    // Touch devices have no hover, so the toolbar cannot rely on
+    // `group-hover` — a tap on the bubble toggles it instead.
+    const [touchOpen, setTouchOpen] = useState(false);
+    const wrapRef = useRef<HTMLDivElement>(null);
+
+    const handleBubbleTap = () => {
+        // `(hover: none)` is the reliable signal for "this device taps rather
+        // than points" — a mouse can hover, a finger cannot.
+        if (window.matchMedia("(hover: none)").matches) {
+            setTouchOpen((prev) => !prev);
+        }
+    };
+
+    // Tapping outside the message closes it. Clicks inside the wrapper are
+    // ignored so the toolbar's own buttons don't dismiss it.
+    useEffect(() => {
+        if (!touchOpen) return;
+        const close = (e: PointerEvent) => {
+            if (wrapRef.current?.contains(e.target as Node)) return;
+            setTouchOpen(false);
+        };
+        document.addEventListener("pointerdown", close);
+        return () => document.removeEventListener("pointerdown", close);
+    }, [touchOpen]);
 
     // An optimistic message is still in flight, so reacting to it would hit a
     // message the server hasn't stored yet.
@@ -89,8 +114,12 @@ const MessageItem: React.FC<{
                 </div>
             ) : null}
             <div
+                ref={wrapRef}
+                onClick={handleBubbleTap}
                 className={classNames(
-                    "relative flex justify-start items-end gap-3 max-w-lg",
+                    // `group` wraps both the bubble and the reaction toolbar, so
+                    // hovering either one reveals the other.
+                    "group relative flex justify-start items-end gap-3 max-w-lg",
                     isOwnMessage ? "ml-auto flex-row-reverse" : "",
                 )}
             >
@@ -100,7 +129,7 @@ const MessageItem: React.FC<{
                 />
                 <div
                     className={classNames(
-                        "group relative p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
+                        "relative p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
                         isOwnMessage
                             ? "rounded-tr-none bg-retro-orange pr-10"
                             : "rounded-tl-none bg-paper",
@@ -300,12 +329,20 @@ const MessageItem: React.FC<{
                     the text. `focus-within` keeps it reachable by keyboard. */}
                 {canReact ? (
                     <div
+                        // Clicks on the toolbar must not bubble to the bubble's
+                        // tap handler, or opening the picker would immediately
+                        // toggle the toolbar shut again.
+                        onClick={(e) => e.stopPropagation()}
                         className={classNames(
-                            "absolute -top-3 z-40 transition-opacity duration-100",
+                            // Centred on the bubble's outer edge rather than
+                            // floating above it — `-top-3` sat above the message
+                            // and read as detached from it.
+                            "absolute top-1/2 z-40 -translate-y-1/2 transition-opacity duration-100",
                             isOwnMessage ? "left-0" : "right-0",
                             "pointer-events-none opacity-0",
                             "group-hover:pointer-events-auto group-hover:opacity-100",
                             "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                            touchOpen ? "pointer-events-auto opacity-100" : "",
                         )}
                     >
                         <ReactionPicker
