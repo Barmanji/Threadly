@@ -14,6 +14,7 @@ import {
   deleteMessage,
   getChatMessages,
   getUserChats,
+  reactToMessage,
   sendMessage,
 } from "../api";
 import AddChatModal from "../components/chat/AddChatModal";
@@ -52,6 +53,7 @@ const MSG_SOUND_URL = "/msg.mp3";
 const LEAVE_CHAT_EVENT = "leaveChat";
 const UPDATE_GROUP_NAME_EVENT = "updateGroupName";
 const MESSAGE_DELETE_EVENT = "messageDeleted";
+const MESSAGE_REACTION_EVENT = "messageReacted";
 // const SOCKET_ERROR_EVENT = "socketError";
 
 // Fallback label when a typing event arrives without sender details.
@@ -527,19 +529,117 @@ const ChatPage = () => {
     ]);
   };
 
+  /**
+   * Add, replace or remove a reaction.
+   *
+   * Applied optimistically so the chip appears on the same frame as the
+   * click, then reconciled against the server's authoritative list. The
+   * optimistic step mirrors the server's toggle rules exactly, so the
+   * reconciliation is a no-op in the normal case rather than a visible
+   * flicker.
+   */
+  const toggleReaction = (
+    message: ChatMessageInterface,
+    emoji: string,
+  ) => {
+    const chatId = currentChat.current?._id;
+    if (!chatId) return;
+
+    const userId = user?._id ?? "";
+    const existing = message.reactions ?? [];
+    const mine = existing.find(
+      (r) => String(r.user?._id) === String(userId),
+    );
+    const isRemoving = mine?.emoji === emoji;
+
+    // Everyone except the current user keeps their entry, unchanged.
+    const others = existing.filter(
+      (r) => String(r.user?._id) !== String(userId),
+    );
+
+    const optimistic: ChatMessageInterface = {
+      ...message,
+      reactions: isRemoving
+        ? others
+        : [
+            ...others,
+            {
+              emoji,
+              user: {
+                _id: userId,
+                username: user?.username ?? "",
+                avatar: user?.avatar ?? "",
+              },
+            },
+          ],
+    };
+
+    setMessages((prev) =>
+      prev.map((m) => (m._id === message._id ? optimistic : m)),
+    );
+
+    requestHandler(
+      async () => await reactToMessage(chatId, message._id, emoji),
+      null,
+      (res) => {
+        // Adopt the server's version of the list: it is the only place that
+        // knows about races with other people's reactions.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m._id === message._id
+              ? { ...m, reactions: res.data.reactions }
+              : m,
+          ),
+        );
+      },
+      (err) => {
+        // Roll the optimistic change back — a failed reaction must not leave
+        // a chip the server has never heard of.
+        setMessages((prev) =>
+          prev.map((m) =>
+            m._id === message._id ? { ...m, reactions: existing } : m,
+          ),
+        );
+        toast.error(err);
+      },
+    );
+  };
+
+  /** A reaction change broadcast by another participant. */
+  const onMessageReaction = (payload: {
+    messageId: string;
+    chatId: string;
+    reactions: ChatMessageInterface["reactions"];
+  }) => {
+    if (payload?.chatId !== currentChat.current?._id) return;
+    setMessages((prev) =>
+      prev.map((m) =>
+        m._id === payload.messageId
+          ? { ...m, reactions: payload.reactions }
+          : m,
+      ),
+    );
+  };
+
   useEffect(() => {
     // Fetch the chat list from the server.
     getChats();
 
     // Retrieve the current chat details from local storage.
-    const _currentChat = LocalStorage.get("currentChat");
+    const _currentChat = LocalStorage.get<ChatListItemInterface>("currentChat");
 
     // If there's a current chat saved in local storage:
     if (_currentChat) {
       // Set the current chat reference to the one from local storage.
       currentChat.current = _currentChat;
       // If the socket connection exists, emit an event to join the specific chat using its ID.
-      socket?.emit(JOIN_CHAT_EVENT, _currentChat.current?._id);
+      //
+      // This read `_currentChat.current?._id`, but `_currentChat` is the chat
+      // object itself and has no `current` property — so it was always
+      // `undefined` and the join was silently a no-op on every page load.
+      // Users only ever got messages because `getMessages` emits the same
+      // event, and only once the socket happened to exist.
+      socket?.emit(JOIN_CHAT_EVENT, _currentChat._id);
       // Fetch the messages for the current chat.
       getMessages();
     }
@@ -590,6 +690,8 @@ const ChatPage = () => {
     socket.on(UPDATE_GROUP_NAME_EVENT, onGroupNameChange);
     //Listener for when a message is deleted
     socket.on(MESSAGE_DELETE_EVENT, onMessageDelete);
+    // Listener for when someone reacts to a message.
+    socket.on(MESSAGE_REACTION_EVENT, onMessageReaction);
     // When the component using this hook unmounts or if `socket` or `chats` change:
     return () => {
       // Remove all the event listeners we set up to avoid memory leaks and unintended behaviors.
@@ -602,6 +704,7 @@ const ChatPage = () => {
       socket.off(LEAVE_CHAT_EVENT, onChatLeave);
       socket.off(UPDATE_GROUP_NAME_EVENT, onGroupNameChange);
       socket.off(MESSAGE_DELETE_EVENT, onMessageDelete);
+      socket.off(MESSAGE_REACTION_EVENT, onMessageReaction);
     };
 
     // Note:
@@ -988,6 +1091,8 @@ const ChatPage = () => {
                             }
                             message={msg}
                             deleteChatMessage={deleteChatMessage}
+                            onReact={toggleReaction}
+                            myUserId={user?._id}
                           />
                         );
                       })}

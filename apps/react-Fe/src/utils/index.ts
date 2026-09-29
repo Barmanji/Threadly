@@ -34,8 +34,14 @@ export const toApiFailure = (error: unknown): ApiFailure => {
     isNetworkError,
   });
 
+  // Deliberately loose rather than `AxiosError`: this function is also handed
+  // a synthesised `{ response: { data } }` from `requestHandler`, which is
+  // not a real axios error.
   const err = error as {
-    response?: { data?: Partial<FreeAPISuccessResponseInterface> & { errors?: unknown } };
+    response?: {
+      data?: Partial<FreeAPISuccessResponseInterface> & { errors?: unknown };
+      status?: number;
+    };
     message?: string;
     code?: string;
   };
@@ -170,7 +176,7 @@ export const formatBytes = (bytes?: number) => {
 // proxy the file through the backend (which sets Content-Disposition:
 // attachment) and download the resulting blob from our own origin.
 export const downloadFile = async (url: string, fileName?: string) => {
-  const token = LocalStorage.get("token");
+  const token = LocalStorage.get<string>("token");
   const apiUri = (import.meta.env.VITE_SERVER_URI as string | undefined) ?? "";
   const name = fileName || url.split("?")[0].split("/").pop() || "download";
   const params = new URLSearchParams({ url, filename: name });
@@ -247,13 +253,20 @@ export const getChatObjectMetadata = (
 
 // A class that provides utility functions for working with local storage
 export class LocalStorage {
-  // Get a value from local storage by key
-  static get(key: string) {
-    if (!isBrowser) return;
+  /**
+   * Get a value from local storage by key.
+   *
+   * Generic so callers get a typed value instead of `any` — everything read
+   * back here is JSON parsed from a string, so the type is only ever an
+   * assertion, but it still catches wrong-shaped reads at the call site.
+   * Returns `null` for a missing key, an unparseable value, or SSR.
+   */
+  static get<T = unknown>(key: string): T | null {
+    if (!isBrowser) return null;
     const value = localStorage.getItem(key);
     if (value) {
       try {
-        return JSON.parse(value);
+        return JSON.parse(value) as T;
       } catch {
         return null;
       }

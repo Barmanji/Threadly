@@ -12,16 +12,42 @@ import { useEffect, useState } from "react";
 import type { ChatMessageInterface } from "../../interfaces/chat";
 import { classNames, formatBytes, getFileKind, downloadFile } from "../../utils";
 import RetroConfirm from "../RetroConfirm";
+import ReactionPicker, { ReactionChips, groupReactions } from "./MessageReactions";
+
 const MessageItem: React.FC<{
     isOwnMessage?: boolean;
     isGroupChatMessage?: boolean;
     message: ChatMessageInterface;
     deleteChatMessage: (message: ChatMessageInterface) => void;
-}> = ({ message, isOwnMessage, isGroupChatMessage, deleteChatMessage }) => {
+    /** Toggles a reaction. Omitted renders the message read-only. */
+    onReact?: (message: ChatMessageInterface, emoji: string) => void;
+    /** Current user id, used to tell "my" reactions from everyone else's. */
+    myUserId?: string;
+}> = ({
+    message,
+    isOwnMessage,
+    isGroupChatMessage,
+    deleteChatMessage,
+    onReact,
+    myUserId,
+}) => {
     const [resizedImage, setResizedImage] = useState<string | null>(null);
     const [openOptions, setopenOptions] = useState<boolean>(false);
     const [confirmDeleteMessage, setConfirmDeleteMessage] =
         useState<boolean>(false);
+
+    // An optimistic message is still in flight, so reacting to it would hit a
+    // message the server hasn't stored yet.
+    const canReact = Boolean(onReact) && !message.sending;
+
+    const myReaction =
+        groupReactions(message.reactions, myUserId).find((g) => g.includesMe)
+            ?.emoji ?? null;
+
+    const handleReact = (emoji: string) => {
+        if (!canReact || !onReact) return;
+        onReact(message, emoji);
+    };
 
     // Close the enlarged-image viewer when the user presses Escape.
     useEffect(() => {
@@ -226,27 +252,48 @@ const MessageItem: React.FC<{
                             <p className="text-sm text-ink">{message.content}</p>
                         </div>
                     ) : null}
-                    {message.sending ? (
-                        <p className="mt-1.5 text-[10px] font-bold text-ink/60 inline-flex items-center gap-1.5">
-                            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ink/60 border-t-transparent" />
-                            sending…
-                        </p>
-                    ) : (
-                        <p
-                            className={classNames(
-                                "mt-1.5 self-end text-[10px] inline-flex items-center",
-                                isOwnMessage ? "text-ink/70" : "text-ink/60",
-                            )}
-                        >
-                            {message.attachments?.length > 0 ? (
-                                <PaperClipIcon className="h-4 w-4 mr-2 " />
-                            ) : null}
-                            {moment(message.updatedAt)
-                                .add("TIME_ZONE", "hours")
-                                .fromNow(true)}{" "}
-                            ago
-                        </p>
-                    )}
+                    {/* Stacked reaction chips, sitting on the bubble's bottom
+                        edge the way WhatsApp stacks them. */}
+                    <ReactionChips
+                        reactions={message.reactions}
+                        myUserId={myUserId}
+                        onReact={handleReact}
+                        disabled={!canReact}
+                    />
+                    <div
+                        className={classNames(
+                            "mt-1 flex items-center gap-1",
+                            isOwnMessage ? "flex-row-reverse" : "",
+                        )}
+                    >
+                        {message.sending ? (
+                            <p className="text-[10px] font-bold text-ink/60 inline-flex items-center gap-1.5">
+                                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ink/60 border-t-transparent" />
+                                sending…
+                            </p>
+                        ) : (
+                            <p
+                                className={classNames(
+                                    "text-[10px] inline-flex items-center",
+                                    isOwnMessage ? "text-ink/70" : "text-ink/60",
+                                )}
+                            >
+                                {message.attachments?.length > 0 ? (
+                                    <PaperClipIcon className="h-4 w-4 mr-2 " />
+                                ) : null}
+                                {moment(message.updatedAt)
+                                    .add("TIME_ZONE", "hours")
+                                    .fromNow(true)}{" "}
+                                ago
+                            </p>
+                        )}
+                        {canReact ? (
+                            <ReactionPicker
+                                onReact={handleReact}
+                                myReaction={myReaction}
+                            />
+                        ) : null}
+                    </div>
                 </div>
             </div>
 

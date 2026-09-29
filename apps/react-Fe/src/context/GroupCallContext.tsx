@@ -365,7 +365,7 @@ export const GroupCallProvider: React.FC<{ children: ReactNode }> = ({
       if (roomIdRef.current || socketRef.current?.connected) return;
       isCallInitiatorRef.current = isInitiator;
 
-      const token = LocalStorage.get("token") as string;
+      const token = LocalStorage.get<string>("token");
       const socket = socketio(getMediasoupURI(), {
         auth: { token },
         transports: ["websocket", "polling"],

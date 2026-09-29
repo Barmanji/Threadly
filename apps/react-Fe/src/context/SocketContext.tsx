@@ -5,7 +5,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import socketio, { type Socket } from "socket.io-client";
+import socketio from "socket.io-client";
 import { LocalStorage } from "../utils";
 import { useAuth } from "./AuthContext";
 
@@ -13,7 +13,7 @@ type AppSocket = ReturnType<typeof socketio>;
 
 // Function to establish a socket connection with authorization token
 const getSocket = (token?: string | null) => {
-  const authToken = token ?? LocalStorage.get("token");
+  const authToken = token ?? LocalStorage.get<string>("token");
   const socketURI = import.meta.env.VITE_SOCKET_URI;
   if (!socketURI) {
     console.error("[socket] VITE_SOCKET_URI is missing from the environment.");

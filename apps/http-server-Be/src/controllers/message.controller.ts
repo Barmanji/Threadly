@@ -54,6 +54,59 @@ const chatMessageCommonAggregation = () => {
         sender: { $first: "$sender" },
       },
     },
+    // Resolve the reactor on each reaction so the client can render avatars
+    // and "who reacted" without a second round trip. Only the fields the UI
+    // needs are projected — an email address has no business riding along
+    // inside a reaction chip.
+    //
+    // The original array has to be stashed first: a `$lookup` on an array
+    // `localField` *replaces* it with the resolved users, dropping the emoji
+    // that was stored alongside each id.
+    {
+      $set: { storedReactions: { $ifNull: ["$reactions", []] } },
+    },
+    {
+      $lookup: {
+        from: "users",
+        foreignField: "_id",
+        localField: "storedReactions.user",
+        as: "resolvedReactors",
+        pipeline: [
+          { $project: { _id: 1, username: 1, avatar: 1 } },
+        ],
+      },
+    },
+    {
+      $set: {
+        reactions: {
+          $map: {
+            input: "$storedReactions",
+            as: "reaction",
+            in: {
+              $mergeObjects: [
+                "$$reaction",
+                // Pair by id, not by position. `$lookup` silently omits users
+                // that no longer exist, so positional pairing would shift
+                // every subsequent emoji onto the wrong person. `$first` of
+                // an empty match is null and `$mergeObjects` ignores it, so a
+                // reaction from a deleted user keeps just its raw id.
+                {
+                  $first: {
+                    $filter: {
+                      input: { $ifNull: ["$resolvedReactors", []] },
+                      as: "reactor",
+                      cond: { $eq: ["$$reactor._id", "$$reaction.user"] },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        },
+      },
+    },
+    // Drop the scratch fields so they never reach the client.
+    { $unset: ["storedReactions", "resolvedReactors"] },
   ];
 };
 
@@ -356,4 +409,123 @@ const deleteMessage: RequestHandler = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, message, "Message deleted successfully"));
 });
 
-export { getAllMessages, sendMessage, deleteMessage, downloadAttachment };
+/** The emojis offered in the reaction picker, in display order. */
+const ALLOWED_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥"] as const;
+
+const reactToMessage: RequestHandler = asyncHandler(async (req, res) => {
+  // Express types path params as `string | string[]`; the route only ever
+  // matches a single segment, so narrow once and reuse.
+  const chatId = String(req.params.chatId ?? "");
+  const messageId = String(req.params.messageId ?? "");
+  const emoji = (req.body?.emoji || "").toString().trim();
+  const userId = (req.user as any)._id;
+
+  if (!mongoose.isValidObjectId(chatId)) {
+    throw new ApiError(400, "That chat link is invalid.");
+  }
+  if (!mongoose.isValidObjectId(messageId)) {
+    throw new ApiError(400, "That message link is invalid.");
+  }
+
+  // A shortlist rather than an open door. Accepting arbitrary strings lets a
+  // client store megabytes of text in a field the UI renders as a chip, and
+  // lets someone push content that is not an emoji at all.
+  if (!(ALLOWED_REACTIONS as readonly string[]).includes(emoji)) {
+    throw new ApiError(
+      400,
+      "Pick one of the available reactions.",
+      [{ path: "emoji", message: "That reaction isn't available." }],
+    );
+  }
+
+  const chat = await Chat.findOne({
+    _id: new mongoose.Types.ObjectId(chatId),
+    participants: userId,
+  });
+  if (!chat) {
+    throw new ApiError(
+      403,
+      "You are not a member of this chat, so you can't react to its messages.",
+    );
+  }
+
+  const message = await ChatMessage.findOne({
+    _id: new mongoose.Types.ObjectId(messageId),
+    chat: new mongoose.Types.ObjectId(chatId),
+  });
+  if (!message) {
+    throw new ApiError(404, "That message no longer exists.");
+  }
+
+  // Toggle semantics, matching what people expect from WhatsApp:
+  //   same user, same emoji  -> remove the reaction
+  //   same user, new emoji   -> replace it
+  //   different user         -> add a new one (stacks in a group)
+  // The untyped model gives `any` here, so the callback params are declared
+  // to keep this file under `noImplicitAny`.
+  const isMine = (r: { user: unknown; emoji: string }) =>
+    String(r.user) === userId.toString();
+
+  const existing = (message.reactions as Array<{ user: unknown; emoji: string }>).find(isMine);
+  const isRemoving = existing?.emoji === emoji;
+
+  // In both branches this user's previous entry goes; the only difference is
+  // whether a new one is appended.
+  message.reactions = (message.reactions as Array<{ user: unknown }>).filter(
+    (r) => !isMine(r as { user: unknown; emoji: string }),
+  );
+  if (!isRemoving) {
+    message.reactions.push({
+      user: new mongoose.Types.ObjectId(userId),
+      emoji,
+    });
+  }
+  await message.save({ validateBeforeSave: false });
+
+  // Re-run the aggregation so the socket payload and the HTTP response have
+  // the same populated shape the initial message fetch produces. Without this
+  // the client receives raw ObjectIds and loses avatars on every update.
+  const [structured] = await ChatMessage.aggregate([
+    { $match: { _id: new mongoose.Types.ObjectId(messageId) } },
+    ...chatMessageCommonAggregation(),
+  ]);
+
+  chat.participants.forEach((participantObjectId: ObjectId) => {
+    if (participantObjectId.toString() === userId.toString()) return;
+    emitSocketEvent(
+      req,
+      participantObjectId.toString(),
+      ChatEventEnum.MESSAGE_REACTION_EVENT,
+      {
+        messageId: structured._id,
+        chatId: structured.chat,
+        reactions: structured.reactions,
+        // Who reacted last, so the client can attribute a "X reacted" hint
+        // without diffing the whole array.
+        updatedBy: structured.sender,
+      },
+    );
+  });
+
+  return res.status(200).json(
+    new ApiResponse(
+      200,
+      {
+        messageId: structured._id,
+        reactions: structured.reactions,
+        // Lets the originating client update its own bubble immediately
+        // rather than waiting for its own socket echo.
+        myReaction: isRemoving ? null : emoji,
+      },
+      isRemoving ? "Reaction removed" : "Reaction added",
+    ),
+  );
+});
+
+export {
+  getAllMessages,
+  sendMessage,
+  deleteMessage,
+  downloadAttachment,
+  reactToMessage,
+};

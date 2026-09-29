@@ -1,4 +1,4 @@
-import { CheckIcon, XIcon } from "@heroicons/react/20/solid";
+import { CheckIcon, XMarkIcon } from "@heroicons/react/20/solid";
 
 interface FieldErrorProps {
   message: string;
@@ -14,7 +14,7 @@ export const FieldError: React.FC<FieldErrorProps> = ({ message, id }) => {
       role="alert"
       className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-retro-red"
     >
-      <XIcon className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+      <XMarkIcon className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
       <span>{message}</span>
     </p>
   );
@@ -63,7 +63,7 @@ export const PasswordRuleList: React.FC<PasswordRuleListProps> = ({
                   aria-hidden="true"
                 />
               ) : (
-                <XIcon
+                <XMarkIcon
                   className="h-3.5 w-3.5 flex-shrink-0 text-ink/30"
                   aria-hidden="true"
                 />

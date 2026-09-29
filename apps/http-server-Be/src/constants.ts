@@ -23,6 +23,8 @@ export const ChatEventEnum = Object.freeze({
   TYPING_EVENT: "typing",
   // ? when message is deleted
   MESSAGE_DELETE_EVENT: "messageDeleted",
+  // ? when someone adds, changes or removes a reaction on a message
+  MESSAGE_REACTION_EVENT: "messageReacted",
   // ? when whiteboard is updated
   WHITEBOARD_UPDATE_EVENT: "whiteboardUpdate",
   // ? when a single stroke is drawn on the whiteboard

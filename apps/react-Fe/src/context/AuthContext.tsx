@@ -163,8 +163,8 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   };
 
   useEffect(() => {
-    const _token = LocalStorage.get("token");
-    const _user = LocalStorage.get("user");
+    const _token = LocalStorage.get<string>("token");
+    const _user = LocalStorage.get<UserInterface>("user");
     if (_token && _user?._id) {
       setUser(_user);
       setToken(_token);
