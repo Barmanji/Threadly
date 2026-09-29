@@ -1,12 +1,14 @@
 import { Link } from "react-router-dom";
 import ThemeToggle from "../ThemeToggle";
+import ChangelogLink from "../ChangelogLink";
 
 export default function HeroSection() {
   return (
     <section className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-doodle px-4">
 
-      {/* Theme switch, pinned out of the way of the hero content */}
-      <div className="absolute right-4 top-4 z-20">
+      {/* Theme switch, pinned out of the way of the hero content. */}
+      <div className="absolute right-4 top-4 z-20 flex items-center gap-3">
+        <ChangelogLink size="md" />
         <ThemeToggle />
       </div>
       {/* Decorative floating shapes */}

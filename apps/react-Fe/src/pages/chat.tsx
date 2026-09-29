@@ -33,6 +33,7 @@ import IncomingCallModal from "../components/call/IncomingCallModal";
 import GroupCallModal from "../components/call/GroupCallModal";
 import GroupCallNotification from "../components/call/GroupCallNotification";
 import ThemeToggle from "../components/ThemeToggle";
+import ChangelogLink from "../components/ChangelogLink";
 import EmojiPicker from "../components/chat/EmojiPicker";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type {
@@ -953,12 +954,22 @@ const ChatPage = () => {
       <div className="w-full justify-between items-stretch h-dvh flex flex-shrink-0 bg-cream overflow-hidden">
         <div
           className={classNames(
-            "relative overflow-y-auto flex-shrink-0 bg-cream",
+            // `flex flex-col` is what lets the footer sit at the bottom of the
+            // sidebar instead of the bottom of the chat list. The list below is
+            // `flex-1`, so it absorbs all the spare height and pushes the footer
+            // down; once the list is tall enough to overflow there is no spare
+            // height left, and the footer follows the list down the page.
+            //
+            // Deliberately no `min-h-0` on the list: the automatic minimum size
+            // of a column flex item is its content, which is what lets a long
+            // list grow past the sidebar and scroll rather than being squashed
+            // to fit. `min-h-0` here would clip the last few chats.
+            "relative overflow-y-auto flex-shrink-0 flex flex-col bg-cream",
             isMobile ? (isChatOpen ? "hidden" : "w-full") : "",
           )}
           style={isMobile ? undefined : { width: sidebarWidth }}
         >
-          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col items-stretch gap-3">
+          <div className="z-10 w-full sticky top-0 flex-shrink-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col items-stretch gap-3">
             <div className="flex items-center justify-start gap-2">
               <button
                 type="button"
@@ -987,7 +998,7 @@ const ChatPage = () => {
               className="min-w-0 flex-1 sm:h-14"
             />
           </div>
-          <div className="px-4">
+          <div className="flex-1 px-4">
             {loadingChats ? (
               <div className="flex justify-center items-center h-[calc(100%-88px)]">
                 <Typing />
@@ -1045,6 +1056,22 @@ const ChatPage = () => {
                   );
                 })
             )}
+          </div>
+          {/* Changelog: a footer across the bottom of the sidebar.
+
+              The sidebar is a flex column and the chat list above is `flex-1`,
+              so this sits on the floor of the sidebar while there is spare
+              height, and slides down with the list once the chats fill it. That
+              is why it is not `sticky`: a sticky footer would pin itself against
+              the bottom of the viewport for the whole session and compete with
+              the conversations.
+
+              `px-3` keeps a gap on the sides so the rule and shadow read as a
+              footer bar rather than a full-bleed block, and the button goes
+              `w-full` to span the width the user asked for. `flex-shrink-0`
+              stops it being compressed when the list is long. */}
+          <div className="flex-shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+            <ChangelogLink size="sm" className="w-full" />
           </div>
         </div>
         {/* Drag handle to resize the sidebar — ink divider only, with a small centered grip */}

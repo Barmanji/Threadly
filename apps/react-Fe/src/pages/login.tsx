@@ -6,6 +6,7 @@ import Button from "../components/Button";
 import { FieldError } from "../components/FieldError";
 import Input from "../components/Input";
 import ThemeToggle from "../components/ThemeToggle";
+import ChangelogLink from "../components/ChangelogLink";
 import { useAuth } from "../context/AuthContext";
 import { LocalStorage } from "../utils";
 import { validateEmail } from "../utils/validation";
@@ -111,7 +112,10 @@ const Login = () => {
 
   return (
     <div className="relative flex h-dvh w-full flex-col items-center justify-center overflow-y-auto bg-doodle bg-doodle-scroll px-4 py-10">
-      <ThemeToggle className="absolute right-4 top-4" />
+      <div className="absolute right-4 top-4 z-20 flex items-center gap-3">
+        <ChangelogLink size="md" />
+        <ThemeToggle />
+      </div>
       <h1 className="neo rotate-[-2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
         Threadly
       </h1>
