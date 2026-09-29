@@ -58,6 +58,9 @@ const CallModal: React.FC<CallModalProps> = ({
   const draggingRef = useRef(false);
   const dragStartYRef = useRef(0);
   const dragStartHRef = useRef(0);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Reset whiteboard when a new call starts so stale state doesn't carry over.
   useEffect(() => {
@@ -79,6 +82,22 @@ const CallModal: React.FC<CallModalProps> = ({
   // the remote peer's toggle, so we rely on the signaling path.
   const remoteVideoOn = !remoteVideoOff;
   const remoteAudioOn = !remoteMuted;
+
+  // `autoPlay` on its own is not enough to guarantee a picture. A media element
+  // whose srcObject is assigned after insertion can sit on frame 0 forever, and
+  // both tiles remount whenever the stream id or a video toggle changes (see
+  // their `key` props), which restarts playback from scratch. Nudging play()
+  // whenever an element or its stream changes covers both cases. The rejection
+  // is swallowed on purpose: a not-yet-playable element just means no track is
+  // attached yet, and the next stream change retries.
+  useEffect(() => {
+    const elements = [
+      remoteVideoRef.current,
+      localVideoRef.current,
+      remoteAudioRef.current,
+    ];
+    for (const el of elements) void el?.play().catch(() => {});
+  }, [remoteStream, localStream, isVideoEnabled, remoteVideoOn, isCallActive]);
 
   // Listen for the peer opening/closing the shared whiteboard.
   // Only active during an active call to avoid picking up stale events.
@@ -178,7 +197,15 @@ const CallModal: React.FC<CallModalProps> = ({
       const onMove = (ev: MouseEvent) => {
         if (!draggingRef.current) return;
         const delta = ev.clientY - dragStartYRef.current;
-        setWhiteboardHeight(Math.max(150, Math.min(dragStartHRef.current + delta, window.innerHeight - 200)));
+        // From `sm` the panel is an overlay pinned to the top of the chat pane
+        // rather than a sibling in the flow, so growing it no longer pushes the
+        // composer down. That also means an unbounded height would cover the
+        // composer instead, so the ceiling leaves room for the header, the
+        // composer and a peek of the conversation. On mobile the 45vh cap
+        // dominates this anyway.
+        setWhiteboardHeight(
+          Math.max(150, Math.min(dragStartHRef.current + delta, window.innerHeight - 320)),
+        );
       };
       const onUp = () => {
         draggingRef.current = false;
@@ -235,7 +262,16 @@ const CallModal: React.FC<CallModalProps> = ({
               key={`${remoteStream.id}-${remoteVideoOn}`}
               autoPlay
               playsInline
+              // Muted on purpose. This element is video-only: the remote audio
+              // track is played by the dedicated <audio> below. Browsers refuse
+              // to autoplay unmuted media once the gesture that started the call
+              // has expired — which it always has by the time signalling
+              // finishes — so an unmuted element renders as a black frame. Muted
+              // autoplay is always permitted, and nothing is lost because the
+              // audio moved to its own element.
+              muted
               ref={(video) => {
+                remoteVideoRef.current = video;
                 if (video && video.srcObject !== remoteStream)
                   video.srcObject = remoteStream;
               }}
@@ -303,6 +339,7 @@ const CallModal: React.FC<CallModalProps> = ({
             playsInline
             muted
             ref={(video) => {
+              localVideoRef.current = video;
               if (video && video.srcObject !== localStream)
                 video.srcObject = localStream;
             }}
@@ -340,9 +377,31 @@ const CallModal: React.FC<CallModalProps> = ({
   if (!isCallActive) return null;
 
   // Video call: resizable layout with drag handle.
+  //
+  // From `sm` the panel is an overlay pinned to the top of the chat pane rather
+  // than a sibling in the flow. Inline, it took its height out of the message
+  // list, so dragging the handle made the whole conversation slide up and down
+  // underneath it. Out of flow the list keeps its exact height and never moves;
+  // a taller panel simply covers more of the older messages. Mobile keeps the
+  // inline version, where the panel is capped and the conversation sits below it.
   if (callType === "video") {
     return (
-      <div className="relative z-10 w-full border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+      <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)] sm:absolute sm:inset-x-0 sm:top-0 sm:z-20">
+        {/* Route the remote audio to the speakers. The tiles are muted
+            (see remoteTile), so without this the peer's voice is dropped
+            entirely in a video call. */}
+        {remoteStream && (
+          <audio
+            autoPlay
+            playsInline
+            className="pointer-events-none absolute h-0 w-0 opacity-0"
+            ref={(audio) => {
+              remoteAudioRef.current = audio;
+              if (audio && audio.srcObject !== remoteStream)
+                audio.srcObject = remoteStream;
+            }}
+          />
+        )}
         <div
           className="relative flex w-full flex-col items-center justify-center gap-4 p-4"
           style={{ height: whiteboardHeight }}
@@ -406,7 +465,9 @@ const CallModal: React.FC<CallModalProps> = ({
             visibility toggled via CSS so strokes are never lost. */}
         {createPortal(
             <div
-              className="fixed inset-0 z-50 flex flex-col bg-ink p-4"
+              // `max()` so the desktop value stays exactly the 1rem it already
+              // had, while a phone with a home indicator reserves room for it.
+              className="fixed inset-0 z-50 flex flex-col bg-ink p-4 pb-[max(1rem,env(safe-area-inset-bottom))]"
               style={{ display: isVisible ? "flex" : "none" }}
             >
               <div className="mb-4 flex flex-shrink-0 items-center justify-between">
@@ -430,16 +491,24 @@ const CallModal: React.FC<CallModalProps> = ({
                 </button>
               </div>
 
-              <div className="flex min-h-0 flex-1 gap-4">
+              {/* On a phone the 288px strip left the whiteboard 39px wide, so
+                  below `sm` the tiles go into a horizontal row on top and the
+                  whiteboard takes the full width underneath. The `sm:` classes
+                  reproduce the desktop split exactly. */}
+              <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row sm:gap-4">
                 {/* Whiteboard */}
                 <div className="min-h-0 flex-1 overflow-hidden rounded-xl border-4 border-ink bg-paper">
                   <Whiteboard chatId={chatId} onClose={toggleWhiteboard} />
                 </div>
 
                 {/* Participants strip (the call keeps running) */}
-                <div className="flex w-72 flex-shrink-0 flex-col gap-4">
-                  {remoteTile("min-h-0 flex-1 w-full flex-shrink-0")}
-                  {localTile("min-h-0 flex-1 w-full flex-shrink-0")}
+                <div className="flex h-24 flex-shrink-0 flex-row gap-3 sm:h-auto sm:w-72 sm:flex-col sm:gap-4">
+                  {remoteTile(
+                    "h-full w-32 min-h-0 flex-shrink-0 sm:flex-1 sm:h-auto sm:w-full",
+                  )}
+                  {localTile(
+                    "h-full w-32 min-h-0 flex-shrink-0 sm:flex-1 sm:h-auto sm:w-full",
+                  )}
                 </div>
               </div>
 
@@ -489,8 +558,12 @@ const CallModal: React.FC<CallModalProps> = ({
   }
 
   // Audio call: whiteboard always mounted (hidden via CSS), toggled by user.
+  //
+  // `sm:absolute` for the same reason as the video panel: inline, the drag
+  // handle resized the board out of the message list's height and the
+  // conversation visibly jumped on every pixel of the drag.
   return (
-    <div className="relative z-10 w-full border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+    <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)] sm:absolute sm:inset-x-0 sm:top-0 sm:z-20">
       {/* Route the remote audio to the speakers */}
       {remoteStream && (
         <audio
@@ -507,116 +580,158 @@ const CallModal: React.FC<CallModalProps> = ({
       {/* Always-mounted whiteboard panel — hidden via CSS when not visible
           so socket listeners stay active and strokes are never lost. */}
       <div
-        className="flex w-full flex-col gap-0"
+        // A 400px panel left no room for the conversation on a phone — header
+        // plus panel plus composer filled the screen, so there was nothing to
+        // read or type into. Capping at 45vh keeps a usable slice of messages
+        // below the board; `sm:max-h-none` leaves the desktop panel alone, and
+        // the drag handle still resizes it either way.
+        className="flex max-h-[45vh] w-full flex-col gap-0 sm:max-h-none"
         style={{
           display: isVisible ? "flex" : "none",
           height: whiteboardHeight,
         }}
       >
-        <div className="flex min-h-0 flex-1 gap-0">
-          {/* Avatars column */}
-          <div className="flex w-48 flex-shrink-0 flex-col items-center justify-center gap-4 border-r-4 border-ink p-3">
-            {/* Remote */}
-            <div
-              className={classNames(
-                "relative rounded-full transition-transform duration-150",
-                remoteSpeaking ? "scale-110" : "",
-              )}
-            >
-              {avatarFailed || !remoteAvatar ? (
-                <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
-                  <UserCircleIcon className="h-12 w-12 text-ink" />
-                </div>
-              ) : (
-                <>
-                  {remoteSpeaking && (
-                    <span className="absolute inset-0 animate-ping rounded-full bg-retro-orange opacity-50" />
-                  )}
-                  <img
-                    src={remoteAvatar}
-                    alt={remoteName}
-                    onError={() => setAvatarFailed(true)}
-                    className={classNames(
-                      "relative h-16 w-16 rounded-full object-cover ring-[3px]",
-                      remoteSpeaking ? "ring-retro-orange" : "ring-ink",
-                    )}
-                  />
-                </>
-              )}
-            </div>
-            <p className="max-w-24 truncate text-center text-[10px] font-extrabold uppercase tracking-wider text-ink">
-              {remoteName || "..."}
-            </p>
-
-            {/* Local */}
-            <div
-              className={classNames(
-                "relative rounded-full transition-transform duration-150",
-                localSpeaking ? "scale-110" : "",
-              )}
-            >
-              {localAvatarFailed || !localAvatar ? (
-                <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
-                  <UserCircleIcon className="h-12 w-12 text-ink" />
-                </div>
-              ) : (
-                <>
-                  {localSpeaking && (
-                    <span className="absolute inset-0 animate-ping rounded-full bg-retro-yellow opacity-60" />
-                  )}
-                  <img
-                    src={localAvatar}
-                    alt="You"
-                    onError={() => setLocalAvatarFailed(true)}
-                    className={classNames(
-                      "relative h-16 w-16 rounded-full object-cover ring-[3px]",
-                      localSpeaking ? "ring-retro-orange" : "ring-ink",
-                    )}
-                  />
-                </>
-              )}
-            </div>
-            <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink">
-              You{isMuted ? " (Muted)" : ""}
-            </p>
-          </div>
-
-          {/* Whiteboard panel */}
-          <div className="min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-0 sm:flex-row">
+          {/* Whiteboard panel — first on mobile so the board gets the full
+              width; `sm:order-2` slots it back between avatars and controls. */}
+          <div className="order-1 flex min-h-0 min-w-0 flex-1 flex-col sm:order-2">
             <Whiteboard
               chatId={chatId}
               onClose={() => setIsVisible(false)}
             />
           </div>
 
-          {/* Controls strip */}
-          <div className="flex w-14 flex-shrink-0 flex-col items-center justify-center gap-3 border-l-4 border-ink bg-cream p-2">
-            <button
-              onClick={toggleMute}
-              className={classNames(
-                "neo-sm neo-press rounded-full p-2 transition",
-                isMuted
-                  ? "bg-retro-red text-paper"
-                  : "bg-paper text-ink hover:bg-retro-yellow",
-              )}
-              title={isMuted ? "Unmute" : "Mute"}
-            >
-              <MicrophoneIcon className="h-4 w-4" />
-            </button>
-            <button
-              onClick={toggleWhiteboard}
-              className="neo-sm neo-press rounded-full bg-retro-yellow p-2 text-ink transition hover:bg-retro-orange hover:text-paper"
-              title="Close whiteboard"
-            >
-              <ArrowsPointingInIcon className="h-4 w-4" />
-            </button>
-            <button
-              onClick={endCall}
-              className="neo-sm neo-press rounded-full bg-retro-red p-2 text-paper transition hover:bg-ink"
-              title="End call"
-            >
-              <PhoneXMarkIcon className="h-4 w-4" />
-            </button>
+          {/* Faces and controls share a row on mobile. `sm:contents` removes
+              this wrapper on desktop so both become plain flex items of the row
+              above, leaving that layout byte-identical.
+
+              `border-t-4` draws the rule that separates the board from the faces
+              below it on a phone, where the board is stacked on top and this
+              row sits under it. On desktop the same rule is drawn by the
+              absolute children inside the avatars column and the control strip,
+              level with the toolbar's own underline.
+
+              `sm:border-t-0` is a guard, not tidying. `sm:contents` generates no
+              box, so this border would not paint on desktop anyway — but that
+              safety currently rests on a subtlety. Stating it explicitly means
+              that if `sm:contents` is ever swapped for a real box, this rule
+              cannot silently reappear on desktop. */}
+          <div className="order-2 flex min-h-0 flex-row border-t-4 border-ink sm:contents sm:border-t-0">
+            {/* Avatars — a horizontal pair on mobile, the original column from
+                `sm` up. The 192px column left the board ~127px wide on a phone.
+                `sm:flex-none` restores `flex: 0 0 auto`: the mobile `flex-1`
+                would otherwise set `flex-basis: 0%`, which overrides `w-48`
+                and lets this column grow into the board.
+
+                The absolute child continues the board's toolbar underline
+                across this column, so the rule runs the full width of the
+                panel instead of stopping at the board's edges. Absolute rather
+                than a spacer so `justify-center` still centres the avatars.
+                h-12 matches the toolbar's pinned height. */}
+            <div className="relative flex min-w-0 flex-1 items-center justify-center gap-4 border-r-4 border-ink p-2 sm:w-48 sm:flex-none sm:flex-col sm:gap-4 sm:p-3">
+              <div className="pointer-events-none absolute inset-x-0 top-0 hidden h-12 border-b-4 border-ink sm:block" />
+              {/* Remote */}
+              <div className="flex min-w-0 items-center gap-2 sm:contents">
+                <div
+                  className={classNames(
+                    "relative rounded-full transition-transform duration-150",
+                    remoteSpeaking ? "scale-110" : "",
+                  )}
+                >
+                  {avatarFailed || !remoteAvatar ? (
+                    <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
+                      <UserCircleIcon className="h-12 w-12 text-ink" />
+                    </div>
+                  ) : (
+                    <>
+                      {remoteSpeaking && (
+                        <span className="absolute inset-0 animate-ping rounded-full bg-retro-orange opacity-50" />
+                      )}
+                      <img
+                        src={remoteAvatar}
+                        alt={remoteName}
+                        onError={() => setAvatarFailed(true)}
+                        className={classNames(
+                          "relative h-16 w-16 rounded-full object-cover ring-[3px]",
+                          remoteSpeaking ? "ring-retro-orange" : "ring-ink",
+                        )}
+                      />
+                    </>
+                  )}
+                </div>
+                <p className="max-w-24 truncate text-center text-[10px] font-extrabold uppercase tracking-wider text-ink">
+                  {remoteName || "..."}
+                </p>
+              </div>
+
+              {/* Local */}
+              <div className="flex min-w-0 items-center gap-2 sm:contents">
+                <div
+                  className={classNames(
+                    "relative rounded-full transition-transform duration-150",
+                    localSpeaking ? "scale-110" : "",
+                  )}
+                >
+                  {localAvatarFailed || !localAvatar ? (
+                    <div className="neo flex h-16 w-16 items-center justify-center rounded-full bg-cream">
+                      <UserCircleIcon className="h-12 w-12 text-ink" />
+                    </div>
+                  ) : (
+                    <>
+                      {localSpeaking && (
+                        <span className="absolute inset-0 animate-ping rounded-full bg-retro-yellow opacity-60" />
+                      )}
+                      <img
+                        src={localAvatar}
+                        alt="You"
+                        onError={() => setLocalAvatarFailed(true)}
+                        className={classNames(
+                          "relative h-16 w-16 rounded-full object-cover ring-[3px]",
+                          localSpeaking ? "ring-retro-orange" : "ring-ink",
+                        )}
+                      />
+                    </>
+                  )}
+                </div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-ink">
+                  You{isMuted ? " (Muted)" : ""}
+                </p>
+              </div>
+            </div>
+
+            {/* Controls strip. The avatars' right border separates them on mobile,
+                so the left border is only needed in the desktop column layout.
+                The absolute child continues the toolbar underline across this
+                strip too, completing the rule. */}
+            <div className="relative flex w-14 flex-shrink-0 flex-col items-center justify-center gap-3 bg-cream p-2 sm:border-l-4 sm:border-ink">
+              <div className="pointer-events-none absolute inset-x-0 top-0 hidden h-12 border-b-4 border-ink sm:block" />
+              <button
+                onClick={toggleMute}
+                className={classNames(
+                  "neo-sm neo-press rounded-full p-2 transition",
+                  isMuted
+                    ? "bg-retro-red text-paper"
+                    : "bg-paper text-ink hover:bg-retro-yellow",
+                )}
+                title={isMuted ? "Unmute" : "Mute"}
+              >
+                <MicrophoneIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={toggleWhiteboard}
+                className="neo-sm neo-press rounded-full bg-retro-yellow p-2 text-ink transition hover:bg-retro-orange hover:text-paper"
+                title="Close whiteboard"
+              >
+                <ArrowsPointingInIcon className="h-4 w-4" />
+              </button>
+              <button
+                onClick={endCall}
+                className="neo-sm neo-press rounded-full bg-retro-red p-2 text-paper transition hover:bg-ink"
+                title="End call"
+              >
+                <PhoneXMarkIcon className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </div>
 

@@ -1,6 +1,7 @@
 import {
   ChevronLeftIcon,
   DocumentIcon,
+  FaceSmileIcon,
   EllipsisVerticalIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
@@ -32,10 +33,13 @@ import IncomingCallModal from "../components/call/IncomingCallModal";
 import GroupCallModal from "../components/call/GroupCallModal";
 import GroupCallNotification from "../components/call/GroupCallNotification";
 import ThemeToggle from "../components/ThemeToggle";
+import ChangelogLink from "../components/ChangelogLink";
+import EmojiPicker from "../components/chat/EmojiPicker";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type {
   ChatListItemInterface,
   ChatMessageInterface,
+  MessageReactionInterface,
 } from "../interfaces/chat";
 import {
   LocalStorage,
@@ -58,6 +62,16 @@ const UPDATE_GROUP_NAME_EVENT = "updateGroupName";
 const MESSAGE_DELETE_EVENT = "messageDeleted";
 const MESSAGE_REACTION_EVENT = "messageReacted";
 // const SOCKET_ERROR_EVENT = "socketError";
+
+// Widths the resizable sidebar is held between. The conversation keeps at least
+// CHAT_MIN_WIDTH, which is what stops the header's call buttons from being
+// squeezed off the right edge when the sidebar is dragged wide.
+const SIDEBAR_MIN_WIDTH = 240;
+const CHAT_MIN_WIDTH = 320;
+
+/** Widest the sidebar may get, leaving CHAT_MIN_WIDTH for the conversation. */
+const maxSidebarWidth = (): number =>
+  Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - CHAT_MIN_WIDTH);
 
 // Fallback label when a typing event arrives without sender details.
 const isTypingGroupFallbackName = (isGroupChat?: boolean) =>
@@ -114,6 +128,13 @@ const ChatPage = () => {
   const [selfTyping, setSelfTyping] = useState(false); // To track if the current user is typing
 
   const [message, setMessage] = useState(""); // To store the currently typed message
+
+  // The composer's emoji picker. `anchor` is the button that opened it, so the
+  // picker can position against it; the input ref is what an emoji gets
+  // inserted into.
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [emojiAnchor, setEmojiAnchor] = useState<HTMLButtonElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   const [localSearchQuery, setLocalSearchQuery] = useState(""); // For local search functionality
 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]); // To store files attached to messages
@@ -295,6 +316,35 @@ const ChatPage = () => {
       },
       (err) => toast.error(err),
     );
+  };
+
+  /**
+   * Insert an emoji at the caret, or append it when the input isn't focused.
+   *
+   * Appending alone would drop the emoji at the end of a half-typed sentence,
+   * which is the one thing an emoji picker must not do.
+   */
+  const insertEmoji = (emoji: string) => {
+    const input = messageInputRef.current;
+
+    if (!input) {
+      setMessage((prev) => prev + emoji);
+      return;
+    }
+
+    const start = input.selectionStart ?? message.length;
+    const end = input.selectionEnd ?? message.length;
+    const next = message.slice(0, start) + emoji + message.slice(end);
+
+    setMessage(next);
+
+    // Move the caret past the inserted emoji. Done after the state update so it
+    // applies to the new value, not the old one.
+    requestAnimationFrame(() => {
+      input.focus();
+      const caret = start + emoji.length;
+      input.setSelectionRange(caret, caret);
+    });
   };
 
   const handleOnMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -551,15 +601,17 @@ const ChatPage = () => {
 
     const userId = user?._id ?? "";
     const existing = message.reactions ?? [];
-    const mine = existing.find(
-      (r) => String(r.user?._id) === String(userId),
-    );
+    // The reactor's id is the raw string in `user`; the resolved profile sits in
+    // sibling fields. Matching on a nested `user._id` never matches anything,
+    // which is what made a second tap on the same emoji append a duplicate
+    // instead of removing it.
+    const isMine = (r: MessageReactionInterface) =>
+      String(r.user) === userId;
+    const mine = existing.find(isMine);
     const isRemoving = mine?.emoji === emoji;
 
     // Everyone except the current user keeps their entry, unchanged.
-    const others = existing.filter(
-      (r) => String(r.user?._id) !== String(userId),
-    );
+    const others = existing.filter((r) => !isMine(r));
 
     const optimistic: ChatMessageInterface = {
       ...message,
@@ -567,13 +619,14 @@ const ChatPage = () => {
         ? others
         : [
             ...others,
+            // Shaped exactly like the server's, so the chip that appears on
+            // this frame is indistinguishable from the reconciled one.
             {
               emoji,
-              user: {
-                _id: userId,
-                username: user?.username ?? "",
-                avatar: user?.avatar ?? "",
-              },
+              user: userId,
+              _id: userId,
+              username: user?.username ?? "",
+              avatar: user?.avatar ?? "",
             },
           ],
     };
@@ -802,8 +855,23 @@ const ChatPage = () => {
 
   // Resizable sidebar: width in px (defaults to ~1/3 of the viewport).
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
-    typeof window !== "undefined" ? Math.round(window.innerWidth / 3) : 420,
+    typeof window !== "undefined"
+      ? Math.min(
+          Math.round(window.innerWidth / 3),
+          Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - CHAT_MIN_WIDTH),
+        )
+      : 420,
   );
+
+  // Narrowing the window has to pull the sidebar in with it. It's a fixed pixel
+  // width with flex-shrink-0, so without this it keeps the width it had at the
+  // old viewport size, crushes the conversation into a sliver, and the header's
+  // call buttons get pushed out of view.
+  useEffect(() => {
+    const onResize = () => setSidebarWidth((prev) => Math.min(prev, maxSidebarWidth()));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // On a phone the sidebar and the conversation can't sit side by side, so the
   // layout becomes one screen at a time: the chat list until a chat is tapped,
@@ -830,15 +898,32 @@ const ChatPage = () => {
     }
   }, [isMobile]);
 
+  // Publish the sidebar's real width so the toast can centre itself over the
+  // conversation instead of the window. It's a draggable element, so the
+  // toaster can't assume a fixed fraction — and routes without this layout
+  // never set the property, which is what centres the toast there instead.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--sidebar-w", `${sidebarWidth}px`);
+    // `removeProperty` returns the old value, so it can't be returned
+    // directly — an effect cleanup has to return nothing.
+    return () => {
+      root.style.removeProperty("--sidebar-w");
+    };
+  }, [sidebarWidth]);
+
   // Handles the drag-to-resize gesture on the sidebar handle.
   const onSidebarDragStart = (e: React.MouseEvent) => {
     e.preventDefault();
     const startX = e.clientX;
     const startWidth = sidebarWidth;
     const onMove = (moveEvent: MouseEvent) => {
+      // Clamp to the upper bound last: applied the other way round, a window
+      // narrower than SIDEBAR_MIN_WIDTH + CHAT_MIN_WIDTH produced a maximum
+      // below the minimum, and the sidebar could be dragged under 240px.
       const next = Math.min(
-        Math.max(startWidth + (moveEvent.clientX - startX), 240),
-        window.innerWidth - 480,
+        Math.max(startWidth + (moveEvent.clientX - startX), SIDEBAR_MIN_WIDTH),
+        maxSidebarWidth(),
       );
       setSidebarWidth(next);
     };
@@ -866,30 +951,26 @@ const ChatPage = () => {
         }}
       />
 
-      {/* Call UI lives outside the conversation branch on purpose. It used to
-          be nested inside it, so closing the chat you're in — or letting the
-          last participant leave a group — unmounted the call window while the
-          call was still live and left the other side talking to nobody. */}
-      <CallModal
-        chatId={callChatId}
-        remoteAvatar={currentChatMetadata?.avatar}
-        remoteName={currentChatMetadata?.title}
-        localAvatar={user?.avatar}
-      />
-      <GroupCallModal chatId={callChatId} />
-      <GroupCallNotification />
-      <IncomingCallModal />
-
       <div className="w-full justify-between items-stretch h-dvh flex flex-shrink-0 bg-cream overflow-hidden">
         <div
           className={classNames(
-            "relative overflow-y-auto flex-shrink-0 bg-cream",
-            isMobile ? (isChatOpen ? "" : "w-full") : "",
+            // `flex flex-col` is what lets the footer sit at the bottom of the
+            // sidebar instead of the bottom of the chat list. The list below is
+            // `flex-1`, so it absorbs all the spare height and pushes the footer
+            // down; once the list is tall enough to overflow there is no spare
+            // height left, and the footer follows the list down the page.
+            //
+            // Deliberately no `min-h-0` on the list: the automatic minimum size
+            // of a column flex item is its content, which is what lets a long
+            // list grow past the sidebar and scroll rather than being squashed
+            // to fit. `min-h-0` here would clip the last few chats.
+            "relative overflow-y-auto flex-shrink-0 flex flex-col bg-cream",
+            isMobile ? (isChatOpen ? "hidden" : "w-full") : "",
           )}
           style={isMobile ? undefined : { width: sidebarWidth }}
         >
-          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col justify-between items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
-            <div className="flex items-center justify-between gap-2 sm:justify-start">
+          <div className="z-10 w-full sticky top-0 flex-shrink-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col items-stretch gap-3">
+            <div className="flex items-center justify-start gap-2">
               <button
                 type="button"
                 className="neo neo-press inline-flex h-12 flex-shrink-0 items-center justify-center whitespace-nowrap bg-retro-red px-4 text-xs font-extrabold uppercase tracking-wide text-paper focus:outline-none sm:h-14 sm:px-5 sm:text-sm"
@@ -906,7 +987,7 @@ const ChatPage = () => {
                 Add chat
               </button>
 
-              <ThemeToggle className="ml-auto sm:ml-0" />
+              <ThemeToggle className="ml-auto" />
             </div>
             <Input
               placeholder="Search user or group..."
@@ -917,7 +998,7 @@ const ChatPage = () => {
               className="min-w-0 flex-1 sm:h-14"
             />
           </div>
-          <div className="px-4">
+          <div className="flex-1 px-4">
             {loadingChats ? (
               <div className="flex justify-center items-center h-[calc(100%-88px)]">
                 <Typing />
@@ -976,6 +1057,22 @@ const ChatPage = () => {
                 })
             )}
           </div>
+          {/* Changelog: a footer across the bottom of the sidebar.
+
+              The sidebar is a flex column and the chat list above is `flex-1`,
+              so this sits on the floor of the sidebar while there is spare
+              height, and slides down with the list once the chats fill it. That
+              is why it is not `sticky`: a sticky footer would pin itself against
+              the bottom of the viewport for the whole session and compete with
+              the conversations.
+
+              `px-3` keeps a gap on the sides so the rule and shadow read as a
+              footer bar rather than a full-bleed block, and the button goes
+              `w-full` to span the width the user asked for. `flex-shrink-0`
+              stops it being compressed when the list is long. */}
+          <div className="flex-shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2">
+            <ChangelogLink size="sm" className="w-full" />
+          </div>
         </div>
         {/* Drag handle to resize the sidebar — ink divider only, with a small centered grip */}
         {isMobile ? null : (
@@ -991,22 +1088,27 @@ const ChatPage = () => {
         )}
         <div
           className={classNames(
-            "flex-1 flex flex-col min-h-0",
+            // min-w-0 is load-bearing: this is a flex child in a row, so its
+            // default min-width:auto would stop it shrinking and let the header
+            // overflow the pane, which then gets clipped by the row's
+            // overflow-hidden. That clipping is what pushed the call buttons off
+            // the right edge.
+            "relative flex-1 flex flex-col min-h-0 min-w-0",
             isMobile && !isChatOpen ? "hidden" : "",
           )}
         >
           {currentChat.current && currentChat.current?._id ? (
             <>
               <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
-                <div className="flex justify-start items-center min-w-0 gap-3 sm:w-max">
+                <div className="flex justify-start items-center min-w-0 flex-1 gap-3">
                   {isMobile ? (
                     <button
                       type="button"
                       onClick={() => setIsChatOpen(false)}
                       aria-label="Back to chats"
-                      className="-ml-1 flex h-9 w-9 flex-shrink-0 items-center justify-center text-ink"
+                      className="-ml-2 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-ink transition-colors active:bg-ink/15"
                     >
-                      <ChevronLeftIcon className="h-7 w-7" aria-hidden="true" />
+                      <ChevronLeftIcon className="h-8 w-8" aria-hidden="true" />
                     </button>
                   ) : null}
                   {currentChat.current.isGroupChat ? (
@@ -1130,10 +1232,41 @@ const ChatPage = () => {
                   </div>
                 }
               </div>
+              {/* Call UI sits below the navbar, not above it.
+
+                  From `sm` the call panel is `absolute`, so that dragging the
+                  whiteboard resizes it without resizing the message list. That
+                  alone anchored it to `top-0` of the pane — which is the top of
+                  the navbar — and it covered the header as soon as a call
+                  connected. This zero-height anchor gives the absolute panel a
+                  containing block that starts below the header instead, so the
+                  overlay drops down underneath it.
+
+                  `sm:block` is load-bearing, not tidying. `contents` on its own
+                  generates no box, and a box-less element cannot be the
+                  containing block for an absolutely positioned child — so
+                  `sm:relative` alone would be inert and the panel would still
+                  resolve `top-0` against the pane, right back over the header.
+                  `sm:block` restores a real (zero-height) box from `sm` up.
+
+                  On mobile `contents` does the opposite job: no box means the
+                  panel is a plain in-flow child of the pane, exactly as before. */}
+              <div className="contents sm:block sm:relative sm:h-0 sm:w-full sm:flex-shrink-0">
+                <CallModal
+                  chatId={callChatId}
+                  remoteAvatar={currentChatMetadata?.avatar}
+                  remoteName={currentChatMetadata?.title}
+                  localAvatar={user?.avatar}
+                />
+              </div>
+              <IncomingCallModal />
+              <GroupCallModal chatId={callChatId} />
+              <GroupCallNotification />
+
               <div className="relative w-full flex-1 min-h-0">
                 <div
                   className={classNames(
-                    "bg-doodle p-8 overflow-y-auto flex flex-col-reverse gap-6 w-full h-full",
+                    "bg-doodle p-8 overflow-x-hidden overflow-y-auto flex flex-col-reverse gap-6 w-full h-full",
                   )}
                   id="message-window"
                 >
@@ -1239,6 +1372,20 @@ const ChatPage = () => {
                   <PaperClipIcon className="w-6 h-6" />
                 </label>
 
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    setEmojiAnchor(e.currentTarget);
+                    setEmojiPickerOpen((prev) => !prev);
+                  }}
+                  aria-label="Insert an emoji"
+                  aria-expanded={emojiPickerOpen}
+                  title="Insert an emoji"
+                  className="neo-sm neo-press block cursor-pointer rounded-sm bg-cream p-4 text-ink hover:bg-retro-yellow"
+                >
+                  <FaceSmileIcon className="w-6 h-6" />
+                </button>
+
                 <Input
                   placeholder="Message"
                   value={message}
@@ -1248,6 +1395,7 @@ const ChatPage = () => {
                       sendChatMessage();
                     }
                   }}
+                  ref={messageInputRef}
                 />
                 <button
                   onClick={sendChatMessage}
@@ -1257,6 +1405,20 @@ const ChatPage = () => {
                   <PaperAirplaneIcon className="w-6 h-6" />
                 </button>
               </div>
+
+              {/* Same picker as the bubble toolbar, opened from the composer.
+                  Picking inserts at the caret rather than reacting to a message. */}
+              {emojiPickerOpen && emojiAnchor ? (
+                <EmojiPicker
+                  anchor={emojiAnchor}
+                  placement="top"
+                  onClose={() => setEmojiPickerOpen(false)}
+                  onPick={(emoji) => {
+                    insertEmoji(emoji);
+                    setEmojiPickerOpen(false);
+                  }}
+                />
+              ) : null}
             </>
           ) : (
             <div className="w-full h-full flex justify-center items-center">

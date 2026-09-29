@@ -5,17 +5,30 @@ interface FieldErrorProps {
   id?: string;
 }
 
-/** Inline validation message, rendered directly beneath its input. */
+/**
+ * Inline validation message, rendered directly beneath its input.
+ *
+ * The message itself is `text-ink`, not red. It used to be `text-retro-red`,
+ * which on the dark theme's background was a contrast ratio of roughly 1.3:1 —
+ * effectively invisible, and the reason these were hard to read. Lightening the
+ * red would not have fixed it: a pale red on a mid-tone background is still a
+ * low-contrast pair. Putting the text on an opaque `bg-paper` panel makes the
+ * contrast a property of the theme rather than of whatever happens to be behind
+ * the error, and red is kept for the bar and the icon as the accent.
+ */
 export const FieldError: React.FC<FieldErrorProps> = ({ message, id }) => {
   if (!message) return null;
   return (
     <p
       id={id}
       role="alert"
-      className="mt-1.5 flex items-start gap-1.5 text-xs font-semibold text-retro-red"
+      className="mt-1.5 flex items-start gap-2 border-l-4 border-retro-red bg-paper px-2.5 py-1.5"
     >
-      <XMarkIcon className="mt-px h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-      <span>{message}</span>
+      <XMarkIcon
+        className="mt-px h-3.5 w-3.5 flex-shrink-0 text-retro-red"
+        aria-hidden="true"
+      />
+      <span className="text-xs font-semibold text-ink">{message}</span>
     </p>
   );
 };

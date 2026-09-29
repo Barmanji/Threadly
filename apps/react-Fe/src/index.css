@@ -29,6 +29,7 @@
   --cream: #efe3ca;
   --paper: #fff8e1;
   --ink: #1b1b1b;
+  --doodle-ink: #1b1b1b;
   --retro-orange: #ff6b35;
   --retro-yellow: #ffd23f;
   --retro-red: #ff3b3b;
@@ -41,6 +42,7 @@
   --cream: #9b8a64;
   --paper: #b2a17a;
   --ink: #14110a;
+  --doodle-ink: #f2ece0;
   --retro-orange: #e05a2a;
   --retro-yellow: #e5ba2c;
   --retro-red: #e03030;
@@ -82,6 +84,39 @@
   }
 }
 
+/*
+ * The register page's avatar picker is a file input, and the browser's default
+ * "Choose File" button has no border and no press feedback — it read as
+ * floating text inside the input's box rather than as something to click.
+ * This gives it the same neo-brutalist treatment as every other button.
+ */
+input[type="file"] {
+  cursor: pointer;
+}
+input[type="file"]::file-selector-button {
+  border: 2px solid var(--color-ink);
+  background-color: var(--color-retro-yellow);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.55rem 0.9rem;
+  margin-right: 0.75rem;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 0 var(--color-ink);
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+input[type="file"]::file-selector-button:hover {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 0 var(--color-ink);
+}
+input[type="file"]::file-selector-button:active {
+  transform: translate(3px, 3px);
+  box-shadow: 0 0 0 0 var(--color-ink);
+}
+
 @layer utilities {
   .truncate-1 {
     overflow: hidden;
@@ -117,13 +152,77 @@
     border: 4px solid var(--color-ink);
   }
 
-  /* WhatsApp-like faint doodle background. Apply to the chat area ONLY. */
+  /*
+   * WhatsApp-like faint doodle background. Apply to the chat area ONLY.
+   *
+   * This is a mask on a `::before`, not a `background-image` data URI. A data
+   * URI cannot read CSS variables, so the doodle's colour was hard-coded to an
+   * orange that all but vanished against the dark theme's background — leaving
+   * only the filled circles, which read as random dots scattered over the chat.
+   * A mask takes its colour from `background-color`, so one SVG serves every
+   * theme and follows `--doodle-ink` like everything else.
+   */
   .bg-doodle {
     background-color: var(--color-cream);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cg fill='none' stroke='%23ff6b35' stroke-width='2' stroke-opacity='0.13'%3E%3Cpath d='M24 40a6 6 0 0 1 6-6h40a6 6 0 0 1 6 6v20a6 6 0 0 1-6 6H38l-10 8v-8h-4a6 6 0 0 1-6-6z'/%3E%3Cpath d='M132 16l3 7 7 3-7 3-3 7-3-7-7-3 7-3z'/%3E%3Cpath d='M132 84c0 6-8 12-12 16-4-4-12-10-12-16 0-5 4-9 9-9 2 0 3 0 3 1 0-1 1-1 3-1 5 0 9 4 9 9z'/%3E%3Cpath d='M96 132l16-3v-16l-16 3v14a6 6 0 0 1-2 6z'/%3E%3Ccircle cx='90' cy='134' r='4'/%3E%3Ccircle cx='116' cy='112' r='4'/%3E%3Cpath d='M48 104v22M37 115h22'/%3E%3Ccircle cx='76' cy='28' r='3'/%3E%3Ccircle cx='16' cy='92' r='3'/%3E%3Ccircle cx='128' cy='132' r='3'/%3E%3Cpath d='M60 60l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' transform='rotate(18 60 67)'/%3E%3C/g%3E%3Ccircle cx='104' cy='52' r='3' fill='%23ffd23f' fill-opacity='0.22'/%3E%3Ccircle cx='44' cy='24' r='2' fill='%23ff6b35' fill-opacity='0.20'/%3E%3Ccircle cx='140' cy='60' r='2' fill='%23ffd23f' fill-opacity='0.22'/%3E%3C/svg%3E");
-    background-repeat: repeat;
-    background-size: 160px 160px;
-    background-attachment: fixed;
+    position: relative;
+    /* Establishes a stacking context so the doodle paints above this element's
+       own background but below its content. */
+    isolation: isolate;
+  }
+  .bg-doodle::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-color: var(--doodle-ink);
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27160%27%20height%3D%27160%27%20viewBox%3D%270%200%20160%20160%27%3E%3Cg%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%3E%3Cpath%20d%3D%27M24%2040a6%206%200%200%201%206-6h40a6%206%200%200%201%206%206v20a6%206%200%200%201-6%206H38l-10%208v-8h-4a6%206%200%200%201-6-6z%27%2F%3E%3Cpath%20d%3D%27M132%2016l3%207%207%203-7%203-3%207-3-7-7-3%207-3z%27%2F%3E%3Cpath%20d%3D%27M132%2084c0%206-8%2012-12%2016-4-4-12-10-12-16%200-5%204-9%209-9%202%200%203%200%203%201%200-1%201-1%203-1%205%200%209%204%209%209z%27%2F%3E%3Cpath%20d%3D%27M96%20132l16-3v-16l-16%203v14a6%206%200%200%201-2%206z%27%2F%3E%3Ccircle%20cx%3D%2790%27%20cy%3D%27134%27%20r%3D%274%27%2F%3E%3Ccircle%20cx%3D%27116%27%20cy%3D%27112%27%20r%3D%274%27%2F%3E%3Cpath%20d%3D%27M48%20104v22M37%20115h22%27%2F%3E%3Ccircle%20cx%3D%2776%27%20cy%3D%2728%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2716%27%20cy%3D%2792%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%27128%27%20cy%3D%27132%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M60%2060l2%205%205%202-5%202-2%205-2-5-5-2%205-2z%27%20transform%3D%27rotate%2818%2060%2067%29%27%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%27104%27%20cy%3D%2752%27%20r%3D%273%27%20fill%3D%27%23000%27%2F%3E%3Ccircle%20cx%3D%2744%27%20cy%3D%2724%27%20r%3D%272%27%20fill%3D%27%23000%27%2F%3E%3Ccircle%20cx%3D%27140%27%20cy%3D%2760%27%20r%3D%272%27%20fill%3D%27%23000%27%2F%3E%3C%2Fsvg%3E");
+    mask-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%27160%27%20height%3D%27160%27%20viewBox%3D%270%200%20160%20160%27%3E%3Cg%20fill%3D%27none%27%20stroke%3D%27%23000%27%20stroke-width%3D%272%27%3E%3Cpath%20d%3D%27M24%2040a6%206%200%200%201%206-6h40a6%206%200%200%201%206%206v20a6%206%200%200%201-6%206H38l-10%208v-8h-4a6%206%200%200%201-6-6z%27%2F%3E%3Cpath%20d%3D%27M132%2016l3%207%207%203-7%203-3%207-3-7-7-3%207-3z%27%2F%3E%3Cpath%20d%3D%27M132%2084c0%206-8%2012-12%2016-4-4-12-10-12-16%200-5%204-9%209-9%202%200%203%200%203%201%200-1%201-1%203-1%205%200%209%204%209%209z%27%2F%3E%3Cpath%20d%3D%27M96%20132l16-3v-16l-16%203v14a6%206%200%200%201-2%206z%27%2F%3E%3Ccircle%20cx%3D%2790%27%20cy%3D%27134%27%20r%3D%274%27%2F%3E%3Ccircle%20cx%3D%27116%27%20cy%3D%27112%27%20r%3D%274%27%2F%3E%3Cpath%20d%3D%27M48%20104v22M37%20115h22%27%2F%3E%3Ccircle%20cx%3D%2776%27%20cy%3D%2728%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%2716%27%20cy%3D%2792%27%20r%3D%273%27%2F%3E%3Ccircle%20cx%3D%27128%27%20cy%3D%27132%27%20r%3D%273%27%2F%3E%3Cpath%20d%3D%27M60%2060l2%205%205%202-5%202-2%205-2-5-5-2%205-2z%27%20transform%3D%27rotate%2818%2060%2067%29%27%2F%3E%3C%2Fg%3E%3Ccircle%20cx%3D%27104%27%20cy%3D%2752%27%20r%3D%273%27%20fill%3D%27%23000%27%2F%3E%3Ccircle%20cx%3D%2744%27%20cy%3D%2724%27%20r%3D%272%27%20fill%3D%27%23000%27%2F%3E%3Ccircle%20cx%3D%27140%27%20cy%3D%2760%27%20r%3D%272%27%20fill%3D%27%23000%27%2F%3E%3C%2Fsvg%3E");
+    -webkit-mask-repeat: repeat;
+    mask-repeat: repeat;
+    -webkit-mask-size: 160px 160px;
+    mask-size: 160px 160px;
+    opacity: 0.08;
+    pointer-events: none;
+  }
+
+  /*
+   * Opt-in variant for when the doodle host is ALSO the scroll container
+   * (the login and register roots: `h-dvh overflow-y-auto bg-doodle`).
+   *
+   * The rule above is `position: absolute; inset: 0`, and `inset: 0` resolves
+   * against the host's padding box. For a scrolling host that box is only the
+   * visible slice, so the doodle came out exactly one viewport tall and then
+   * scrolled away with the content — anything past the fold rendered on bare
+   * cream. Measured on the register root: 673px of doodle over 923px of
+   * content, and once scrolled to the bottom the whole viewport was bare.
+   *
+   * `fixed` puts the layer back in the viewport's coordinate space, so it
+   * covers the visible area at every scroll offset while still covering the
+   * whole page when the form is taller than the viewport. The mask, opacity,
+   * colour and pointer-events all still come from the shared rule above, so
+   * the two cannot drift apart.
+   *
+   * `sticky` looks like the obvious choice here and is wrong twice over. It is
+   * a *relatively*-positioned value, not an out-of-flow one:
+   *   - as a flex item it stays in the column, so `height: 100dvh` added a
+   *     phantom 700px above the form. Measured: /login scrolled by 331px and
+   *     /register by 434px when they had no reason to scroll at all, and the
+   *     H1 was pushed to 406px instead of ~129px.
+   *   - `left: 0; right: 0` only *offsets* a relatively-positioned box, it
+   *     does not size it, so the layer collapsed to fit-content and measured
+   *     0px wide — the doodle disappeared entirely.
+   * `fixed` is safe here because no ancestor of the auth roots has a
+   * transform, filter, perspective, will-change or contain that would trap it
+   * (verified at runtime; the transforms in this file are all on `.neo`
+   * descendants and the toast, never on an ancestor).
+   *
+   * Deliberately opt-in: the chat's message window scrolls too and has the
+   * same latent gap, but changing its background is a visible change that was
+   * not asked for.
+   */
+  .bg-doodle.bg-doodle-scroll::before {
+    position: fixed;
+    inset: 0;
   }
 }
 

@@ -31,8 +31,12 @@ export const useTheme = () => {
 };
 
 /**
- * Falls back to the OS preference the first time, so a visitor who never
- * touches the toggle still gets a sensible theme.
+ * Light unless the visitor has chosen otherwise.
+ *
+ * This deliberately does not consult `prefers-color-scheme`. Following the OS
+ * meant anyone whose system was set to dark got a dark app whether they wanted
+ * it or not, which read as "dark mode turns itself on". The toggle is one tap
+ * away on every page, so a light default costs little.
  */
 const readInitialTheme = (): Theme => {
   if (typeof window === "undefined") return "light";
@@ -40,9 +44,7 @@ const readInitialTheme = (): Theme => {
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
   if (stored === "light" || stored === "dark") return stored;
 
-  return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
+  return "light";
 };
 
 export const ThemeProvider = ({ children }: { children: ReactNode }) => {

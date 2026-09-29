@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/login";
 import Register from "./pages/register";
 import Landing from "./pages/landing";
+import Changelog from "./pages/changelog";
 import ChatPage from "./pages/chat";
 import { useAuth } from "./context/AuthContext";
 import PrivateRoute from "./components/PrivateRoute";
@@ -42,6 +43,11 @@ const App = () => {
           </PublicRoute>
         }
       />
+
+      {/* Changelog: intentionally unguarded. `PublicRoute` bounces signed-in
+          users to /chat, which would make the sidebar footer's link dead for
+          exactly the people who can see it, so this route is open to both. */}
+      <Route path="/changelog" element={<Changelog />} />
 
       {/* Public register route: Accessible by everyone */}
       <Route

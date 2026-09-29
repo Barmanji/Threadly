@@ -10,6 +10,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
+import { readFileSync } from "node:fs";
 
 if (process.env.RUN_E2E !== "1") {
   console.error(
@@ -209,6 +210,74 @@ const main = async () => {
     body: { emoji: "😂" },
   });
   check("non-member is refused with 403", stranger.status === 403, `got ${stranger.status}`);
+
+  console.log("\n9. The frontend and backend emoji lists agree");
+  // The picker is only useful if every emoji it offers is one the server will
+  // accept. Both lists are generated from one source; this asserts it.
+  //
+  // The backend list lives inline in message.controller.ts (it is not exported,
+  // and pulling it out into a module just for a test would be churn), so it is
+  // read back out of the source and compared as text.
+  const { ALL_REACTION_EMOJIS: feEmojis, EMOJI_SECTIONS } = await import(
+    "../../react-Fe/src/components/chat/reactionEmojis.ts"
+  );
+  const controllerSource = readFileSync(
+    new URL("../src/controllers/message.controller.ts", import.meta.url),
+    "utf8",
+  );
+  const beMatch = controllerSource.match(
+    /const ALLOWED_REACTIONS = \[([\s\S]*?)\] as const;/,
+  );
+  check("backend allow-list is readable", Boolean(beMatch));
+  const beEmojis = beMatch
+    ? [...beMatch[1].matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) =>
+        JSON.parse(`"${m[1]}"`),
+      )
+    : [];
+
+  const feSet = new Set(feEmojis);
+  const beSet = new Set(beEmojis);
+  check(
+    "same length",
+    feEmojis.length === beEmojis.length,
+    `fe=${feEmojis.length} be=${beEmojis.length}`,
+  );
+  check(
+    "no emoji offered by the UI is missing on the server",
+    [...feSet].every((e) => beSet.has(e)),
+    [...feSet].filter((e) => !beSet.has(e)).join(" "),
+  );
+  check(
+    "no server emoji is missing from the UI",
+    [...beSet].every((e) => feSet.has(e)),
+    [...beSet].filter((e) => !feSet.has(e)).join(" "),
+  );
+  check(
+    "at least 200 emoji available",
+    feEmojis.length >= 200,
+    `got ${feEmojis.length}`,
+  );
+
+  // Spot-check that an emoji from each section is actually accepted over HTTP,
+  // rather than assuming the list is wired up because it is long. Each is
+  // toggled back off so the next section starts from a clean slate.
+  for (const section of EMOJI_SECTIONS) {
+    const probe = section.emojis[0]?.emoji;
+    if (!probe) continue;
+    const r = await req("PUT", `/messages/${chatId}/${messageId}/reaction`, {
+      token: tokens[0],
+      body: { emoji: probe },
+    });
+    check(
+      `${section.id} emoji accepted`,
+      r.status === 200,
+      `${section.id}/${probe} -> ${r.status}`,
+    );
+    await req("PUT", `/messages/${chatId}/${messageId}/reaction`, {
+      token: tokens[0],
+      body: { emoji: probe },
+    });
+  }
 
   // Cleanup
   await db.collection("users").deleteMany({
