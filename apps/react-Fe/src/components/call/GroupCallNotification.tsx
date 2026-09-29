@@ -134,7 +134,7 @@ const GroupCallNotification: React.FC = () => {
     incomingGroupCall.fromUser?.username || incomingGroupCall.from;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4">
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-ink/60 p-4">
       <div className="neo w-full max-w-sm bg-retro-yellow p-6">
         <div className="mb-4 flex items-center gap-4">
           {incomingGroupCall.fromUser?.avatar ? (

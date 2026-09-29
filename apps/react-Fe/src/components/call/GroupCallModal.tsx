@@ -205,7 +205,7 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-ink p-4">
+    <div className="absolute inset-0 z-50 flex flex-col bg-ink p-4">
       {/* Header */}
       <div className="mb-4 flex flex-shrink-0 items-center justify-between">
         <span className="w-10" />

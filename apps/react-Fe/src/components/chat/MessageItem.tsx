@@ -352,7 +352,7 @@ const MessageItem: React.FC<{
                                 // received ones, so it reads as attached to the
                                 // message rather than floating near it.
                                 "absolute top-1/2 z-40 -translate-y-1/2 transition-opacity duration-100",
-                                isOwnMessage ? "-left-2" : "-right-2",
+                                isOwnMessage ? "-left-3" : "-right-3",
                                 "pointer-events-none opacity-0",
                                 "group-hover:pointer-events-auto group-hover:opacity-100",
                                 "group-focus-within:pointer-events-auto group-focus-within:opacity-100",

@@ -918,20 +918,6 @@ const ChatPage = () => {
         }}
       />
 
-      {/* Call UI lives outside the conversation branch on purpose. It used to
-          be nested inside it, so closing the chat you're in — or letting the
-          last participant leave a group — unmounted the call window while the
-          call was still live and left the other side talking to nobody. */}
-      <CallModal
-        chatId={callChatId}
-        remoteAvatar={currentChatMetadata?.avatar}
-        remoteName={currentChatMetadata?.title}
-        localAvatar={user?.avatar}
-      />
-      <GroupCallModal chatId={callChatId} />
-      <GroupCallNotification />
-      <IncomingCallModal />
-
       <div className="w-full justify-between items-stretch h-dvh flex flex-shrink-0 bg-cream overflow-hidden">
         <div
           className={classNames(
@@ -1043,12 +1029,24 @@ const ChatPage = () => {
         )}
         <div
           className={classNames(
-            "flex-1 flex flex-col min-h-0",
+            "relative flex-1 flex flex-col min-h-0",
             isMobile && !isChatOpen ? "hidden" : "",
           )}
         >
           {currentChat.current && currentChat.current?._id ? (
             <>
+              {/* Call UI is scoped to the conversation, as it always was. At
+                  page level the modals overlay the whole window and cover the
+                  sidebar; here they cover only the chat pane. */}
+              <CallModal
+                chatId={callChatId}
+                remoteAvatar={currentChatMetadata?.avatar}
+                remoteName={currentChatMetadata?.title}
+                localAvatar={user?.avatar}
+              />
+              <GroupCallModal chatId={callChatId} />
+              <GroupCallNotification />
+              <IncomingCallModal />
               <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
                 <div className="flex justify-start items-center min-w-0 gap-3 sm:w-max">
                   {isMobile ? (
