@@ -830,6 +830,20 @@ const ChatPage = () => {
     }
   }, [isMobile]);
 
+  // Publish the sidebar's real width so the toast can centre itself over the
+  // conversation instead of the window. It's a draggable element, so the
+  // toaster can't assume a fixed fraction — and routes without this layout
+  // never set the property, which is what centres the toast there instead.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--sidebar-w", `${sidebarWidth}px`);
+    // `removeProperty` returns the old value, so it can't be returned
+    // directly — an effect cleanup has to return nothing.
+    return () => {
+      root.style.removeProperty("--sidebar-w");
+    };
+  }, [sidebarWidth]);
+
   // Handles the drag-to-resize gesture on the sidebar handle.
   const onSidebarDragStart = (e: React.MouseEvent) => {
     e.preventDefault();
