@@ -884,7 +884,7 @@ const ChatPage = () => {
         <div
           className={classNames(
             "relative overflow-y-auto flex-shrink-0 bg-cream",
-            isMobile ? (isChatOpen ? "" : "w-full") : "",
+            isMobile ? (isChatOpen ? "hidden" : "w-full") : "",
           )}
           style={isMobile ? undefined : { width: sidebarWidth }}
         >
@@ -1004,9 +1004,9 @@ const ChatPage = () => {
                       type="button"
                       onClick={() => setIsChatOpen(false)}
                       aria-label="Back to chats"
-                      className="-ml-1 flex h-9 w-9 flex-shrink-0 items-center justify-center text-ink"
+                      className="-ml-2 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full text-ink transition-colors active:bg-ink/15"
                     >
-                      <ChevronLeftIcon className="h-7 w-7" aria-hidden="true" />
+                      <ChevronLeftIcon className="h-8 w-8" aria-hidden="true" />
                     </button>
                   ) : null}
                   {currentChat.current.isGroupChat ? (
