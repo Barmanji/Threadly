@@ -135,7 +135,7 @@ const loginUser: RequestHandler = asyncHandler(
     if (!findUser) {
       throw new ApiError(
         404,
-        "This user doesn't exist with this email or username",
+        "No account exists with that email or username. Check for typos, or create an account if you don't have one yet.",
       );
     }
     const passwordValidity = await findUser.isPasswordCorrect(password);

@@ -5,6 +5,15 @@ export interface FreeAPISuccessResponseInterface<T = unknown> {
   message: string;
   statusCode: number;
   success: boolean;
+  /** Machine-readable failure code, mirrors the backend `ApiErrorCode`. */
+  code?: string;
+  /** Field-level problems, each mapped back onto a form input. */
+  errors?: ApiFieldErrorInterface[];
+}
+
+export interface ApiFieldErrorInterface {
+  path: string;
+  message: string;
 }
 
 export interface LoginResponseData {

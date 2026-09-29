@@ -19,32 +19,46 @@ interface CustomJwtPayload extends JwtPayload {
     _id: string;
 }
 export const verifyJWT: RequestHandler = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    // An `ApiError` we threw ourselves is already user-facing; re-throw as-is
+    // instead of flattening it into a generic 401.
     try {
         const token =
             req.cookies?.accessToken ||
             req.header("Authorization")?.replace("Bearer ", "");
-        //aliased as req.get (req.header(field))
-        // console.log(token);
         if (!token) {
-            throw new ApiError(401, "Unauthorized request");
+            throw new ApiError(401, "You're not signed in. Please log in to continue.");
         }
 
-        const decodedToken = jwt.verify(
-            token,
-            process.env.ACCESS_TOKEN_SECRET as string,
-        ) as CustomJwtPayload;
+        let decodedToken: CustomJwtPayload;
+        try {
+            decodedToken = jwt.verify(
+                token,
+                process.env.ACCESS_TOKEN_SECRET as string,
+            ) as CustomJwtPayload;
+        } catch {
+            // `jsonwebtoken` throws things like "jwt malformed" / "jwt expired".
+            // Those are implementation details — translate them into something
+            // the frontend can act on (it retries on 401 via /refresh-token).
+            throw new ApiError(
+                401,
+                "Your session has expired. Please log in again.",
+                [],
+                "UNAUTHORIZED",
+            );
+        }
 
         const user = await User.findById(decodedToken?._id).select(
             "-password -refreshToken",
         );
 
         if (!user) {
-            throw new ApiError(401, "Invalid Access Token");
+            throw new ApiError(401, "Your session is no longer valid. Please log in again.");
         }
 
         req.user = user;
         next();
-    } catch (error: any) {
-        throw new ApiError(401, error?.message || "Invalid access token");
+    } catch (error: unknown) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(401, "You're not authorised to do that. Please log in again.");
     }
 });

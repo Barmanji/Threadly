@@ -383,7 +383,10 @@ const renameGroupChat: RequestHandler = asyncHandler(
     if (
       groupChat.admin?.toString() !== (req.user as IUserWithId)._id?.toString()
     ) {
-      throw new ApiError(404, "You are not an admin");
+      throw new ApiError(
+        403,
+        "Only a group admin can do that. Ask an admin to make this change.",
+      );
     }
 
     const updatedGroupChat = await Chat.findByIdAndUpdate(
@@ -557,7 +560,10 @@ const leaveGroupChat: RequestHandler = asyncHandler(
 
     // check if the participant that is leaving the group, is part of the group
     if (!existingParticipants?.includes((req.user as IUserWithId)._id)) {
-      throw new ApiError(400, "You are not a part of this group chat");
+      throw new ApiError(
+        403,
+        "You are not a member of this group chat.",
+      );
     }
 
     const updatedChat = await Chat.findByIdAndUpdate(
@@ -617,7 +623,10 @@ const addNewParticipantInGroupChat: RequestHandler = asyncHandler(
     if (
       groupChat.admin?.toString() !== (req.user as IUserWithId)._id?.toString()
     ) {
-      throw new ApiError(404, "You are not an admin");
+      throw new ApiError(
+        403,
+        "Only a group admin can do that. Ask an admin to make this change.",
+      );
     }
 
     const existingParticipants = groupChat.participants;
@@ -687,7 +696,10 @@ const removeParticipantFromGroupChat: RequestHandler = asyncHandler(
     if (
       groupChat.admin?.toString() !== (req.user as IUserWithId)._id?.toString()
     ) {
-      throw new ApiError(404, "You are not an admin");
+      throw new ApiError(
+        403,
+        "Only a group admin can do that. Ask an admin to make this change.",
+      );
     }
 
     const existingParticipants = groupChat.participants;

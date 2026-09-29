@@ -67,7 +67,10 @@ const getAllMessages: RequestHandler = asyncHandler(async (req, res) => {
 
   // Only send messages if the logged in user is a part of the chat he is requesting messages of
   if (!selectedChat.participants?.includes((req.user as any)._id)) {
-    throw new ApiError(400, "User is not a part of this chat");
+    throw new ApiError(
+      403,
+      "You are not a member of this chat, so you can't read its messages.",
+    );
   }
 
   const messages = await ChatMessage.aggregate([
