@@ -103,7 +103,7 @@ const MessageItem: React.FC<{
                         " relative p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
                         isOwnMessage
                             ? "rounded-tr-none bg-retro-orange pr-10"
-                            : "rounded-tl-none bg-white",
+                            : "rounded-tl-none bg-paper",
                     )}
                 >
                     {isOwnMessage && !message.sending ? (

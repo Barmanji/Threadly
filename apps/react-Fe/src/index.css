@@ -1,7 +1,55 @@
 @import url("https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap");
 @import "tailwindcss";
 
-@theme {
+/*
+ * Dark mode is driven by a class on <html> rather than the OS preference, so
+ * the in-app toggle can win over `prefers-color-scheme`. The `dark:` variant
+ * is registered for the cases where a one-off override is easier than editing
+ * a palette entry.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * The palette lives in plain custom properties, separate from `@theme`, so the
+ * same block of Tailwind utilities can be re-pointed for dark mode.
+ *
+ * This only works because of `inline` below: without it Tailwind bakes each
+ * theme value straight into the generated utilities, so re-declaring `--cream`
+ * under `.dark` would have nothing to act on. With it, `bg-cream` compiles to
+ * `background-color: var(--cream)` and the override takes effect.
+ *
+ * Dark is intentionally the *same* retro look with the brightness turned down
+ * rather than a re-design: same warm hues, same hard shadows, and the same
+ * relationships (dark ink on tan, pale text on the red/orange accents). Anything
+ * that inverted ink against a bright accent — the yellow buttons, the call
+ * modal canvas, the landing footer — would have lost contrast, and `ink` is
+ * doing double duty as a background there, so it can't be flipped.
+ */
+:root {
+  --cream: #efe3ca;
+  --paper: #fff8e1;
+  --ink: #1b1b1b;
+  --retro-orange: #ff6b35;
+  --retro-yellow: #ffd23f;
+  --retro-red: #ff3b3b;
+  --retro-green: #2ecc71;
+  --retro-blue: #3b82f6;
+  --retro-pink: #ff7ad9;
+}
+
+.dark {
+  --cream: #9b8a64;
+  --paper: #b2a17a;
+  --ink: #14110a;
+  --retro-orange: #e05a2a;
+  --retro-yellow: #e5ba2c;
+  --retro-red: #e03030;
+  --retro-green: #26ac5d;
+  --retro-blue: #2f6fd0;
+  --retro-pink: #e368bf;
+}
+
+@theme inline {
   --color-primary: #6b8afd;
   --color-secondary: #2e333d;
   --color-dark: #212328;
@@ -9,18 +57,20 @@
   --color-success: #4aac68;
 
   /* Neo-brutalist retro palette */
-  --color-cream: #efe3ca;
-  --color-paper: #fff8e1;
-  --color-ink: #1b1b1b;
-  --color-retro-orange: #ff6b35;
-  --color-retro-yellow: #ffd23f;
-  --color-retro-red: #ff3b3b;
-  --color-retro-green: #2ecc71;
-  --color-retro-blue: #3b82f6;
-  --color-retro-pink: #ff7ad9;
+  --color-cream: var(--cream);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-retro-orange: var(--retro-orange);
+  --color-retro-yellow: var(--retro-yellow);
+  --color-retro-red: var(--retro-red);
+  --color-retro-green: var(--retro-green);
+  --color-retro-blue: var(--retro-blue);
+  --color-retro-pink: var(--retro-pink);
 
-  --shadow-ink: 5px 5px 0 0 #1b1b1b;
-  --shadow-ink-sm: 3px 3px 0 0 #1b1b1b;
+  /* The hard offset shadow is part of the style, so it has to follow `ink`
+     too — hard-coding the colour here left a black shadow in dark mode. */
+  --shadow-ink: 5px 5px 0 0 var(--ink);
+  --shadow-ink-sm: 3px 3px 0 0 var(--ink);
 }
 
 @layer base {

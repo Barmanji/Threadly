@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import Button from "../components/Button";
 import { FieldError } from "../components/FieldError";
 import Input from "../components/Input";
+import ThemeToggle from "../components/ThemeToggle";
 import { useAuth } from "../context/AuthContext";
 import { LocalStorage } from "../utils";
 import { validateEmail } from "../utils/validation";
@@ -109,7 +110,8 @@ const Login = () => {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col items-center justify-center overflow-y-auto bg-cream px-4 py-10">
+    <div className="relative flex h-screen w-screen flex-col items-center justify-center overflow-y-auto bg-cream px-4 py-10">
+      <ThemeToggle className="absolute right-4 top-4" />
       <h1 className="neo rotate-[-2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
         Threadly
       </h1>

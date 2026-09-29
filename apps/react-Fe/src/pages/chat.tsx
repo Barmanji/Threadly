@@ -30,6 +30,7 @@ import CallModal from "../components/call/CallModal";
 import IncomingCallModal from "../components/call/IncomingCallModal";
 import GroupCallModal from "../components/call/GroupCallModal";
 import GroupCallNotification from "../components/call/GroupCallNotification";
+import ThemeToggle from "../components/ThemeToggle";
 import type {
   ChatListItemInterface,
   ChatMessageInterface,
@@ -859,6 +860,8 @@ const ChatPage = () => {
                 <PlusIcon className="mr-1 h-4 w-4" aria-hidden="true" />
                 Add chat
               </button>
+
+              <ThemeToggle className="ml-auto sm:ml-0" />
             </div>
             <Input
               placeholder="Search user or group..."
