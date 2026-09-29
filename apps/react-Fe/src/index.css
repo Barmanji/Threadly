@@ -196,35 +196,33 @@ input[type="file"]::file-selector-button:active {
    * cream. Measured on the register root: 673px of doodle over 923px of
    * content, and once scrolled to the bottom the whole viewport was bare.
    *
-   * `sticky` pins the layer to the top of the scrollport instead, so one
-   * viewport of doodle keeps covering the viewport at every scroll offset. It
-   * is still `z-index: -1`, so content keeps painting over it.
+   * `fixed` puts the layer back in the viewport's coordinate space, so it
+   * covers the visible area at every scroll offset while still covering the
+   * whole page when the form is taller than the viewport. The mask, opacity,
+   * colour and pointer-events all still come from the shared rule above, so
+   * the two cannot drift apart.
    *
-   * The two non-obvious declarations are both load-bearing, and both were
-   * measured rather than reasoned about — the auth roots are column flex
-   * containers, so this `::before` is a flex item:
-   *   - `flex: 0 0 auto` — as a flex item it defaults to `flex: 0 1 auto`, so a
-   *     specified height gets shrunk to nothing when the content is tall. Left
-   *     alone the layer measured 0px tall.
-   *   - `height: 100dvh` — `height: 100%` resolves against the host's *content*
-   *     box, which is the `py-10` smaller: 593px of doodle over a 673px
-   *     viewport, leaving the bottom 80px bare. The host is `h-dvh`, so the
-   *     viewport unit matches it exactly.
+   * `sticky` looks like the obvious choice here and is wrong twice over. It is
+   * a *relatively*-positioned value, not an out-of-flow one:
+   *   - as a flex item it stays in the column, so `height: 100dvh` added a
+   *     phantom 700px above the form. Measured: /login scrolled by 331px and
+   *     /register by 434px when they had no reason to scroll at all, and the
+   *     H1 was pushed to 406px instead of ~129px.
+   *   - `left: 0; right: 0` only *offsets* a relatively-positioned box, it
+   *     does not size it, so the layer collapsed to fit-content and measured
+   *     0px wide — the doodle disappeared entirely.
+   * `fixed` is safe here because no ancestor of the auth roots has a
+   * transform, filter, perspective, will-change or contain that would trap it
+   * (verified at runtime; the transforms in this file are all on `.neo`
+   * descendants and the toast, never on an ancestor).
    *
-   * Only sizing and positioning are overridden — the mask, opacity, colour and
-   * pointer-events all still come from `.bg-doodle::before` above, so the two
-   * cannot drift apart. Deliberately opt-in: the chat's message window scrolls
-   * too and has the same latent gap, but it is not `h-dvh` and changing its
-   * background is a visible change that was not asked for.
+   * Deliberately opt-in: the chat's message window scrolls too and has the
+   * same latent gap, but changing its background is a visible change that was
+   * not asked for.
    */
   .bg-doodle.bg-doodle-scroll::before {
-    position: sticky;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: auto;
-    flex: 0 0 auto;
-    height: 100dvh;
+    position: fixed;
+    inset: 0;
   }
 }
 
