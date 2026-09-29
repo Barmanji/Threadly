@@ -63,6 +63,18 @@ interface ReactionPickerProps {
  * Rendered inside the bubble, positioned above it, and kept open on hover so
  * a reaction can be chosen without a second click. Touch devices have no
  * hover, so the button toggles the popover as well.
+ *
+ * Two details make the hover actually usable:
+ *
+ *  - The popover's box is flush against the trigger. An earlier version put an
+ *    8px margin between them, and `margin` is not part of an element's hit
+ *    area — the pointer crossed that gap, `mouseleave` fired, and the popover
+ *    unmounted before the cursor arrived. It was unreachable, not just fiddly.
+ *    The gap is now padding on the far side, so trigger and popover are one
+ *    continuous box.
+ *
+ *  - Closing is deferred briefly, so a flick that clips a corner on the way up
+ *    doesn't kill the popover mid-trajectory.
  */
 const ReactionPicker: React.FC<ReactionPickerProps> = ({
   onReact,
@@ -71,6 +83,33 @@ const ReactionPicker: React.FC<ReactionPickerProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingClose = () => {
+    if (closeTimer.current === null) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+
+  // Hover-open is only wired up where hovering is a real, separate gesture.
+  // On touch, `mouseenter` arrives as part of the tap, so leaving it enabled
+  // would close the popover the instant the finger lifted.
+  const canHover =
+    typeof window !== "undefined" &&
+    window.matchMedia("(hover: hover)").matches;
+
+  const openNow = () => {
+    cancelPendingClose();
+    setOpen(true);
+  };
+
+  const closeSoon = () => {
+    cancelPendingClose();
+    closeTimer.current = setTimeout(() => {
+      closeTimer.current = null;
+      setOpen(false);
+    }, 150);
+  };
 
   // Close on an outside click or Escape rather than leaving the popover
   // stranded over the message list.
@@ -78,10 +117,15 @@ const ReactionPicker: React.FC<ReactionPickerProps> = ({
     if (!open) return;
 
     const onPointerDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        cancelPendingClose();
+        setOpen(false);
+      }
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      cancelPendingClose();
+      setOpen(false);
     };
 
     document.addEventListener("mousedown", onPointerDown);
@@ -92,12 +136,16 @@ const ReactionPicker: React.FC<ReactionPickerProps> = ({
     };
   }, [open]);
 
+  // A pending close that fires after unmount would be a state update on a dead
+  // component — and on a message that scrolled away, that means nothing at all.
+  useEffect(() => cancelPendingClose, []);
+
   return (
     <div
       ref={wrapRef}
       className="relative"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
+      onMouseEnter={canHover ? openNow : undefined}
+      onMouseLeave={canHover ? closeSoon : undefined}
     >
       <button
         type="button"
@@ -111,25 +159,31 @@ const ReactionPicker: React.FC<ReactionPickerProps> = ({
       </button>
 
       {open ? (
-        <div className="neo-sm absolute bottom-full right-0 z-50 mb-2 flex gap-0.5 bg-paper p-1.5">
-          {REACTION_EMOJIS.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              aria-label={`React with ${emoji}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                onReact(emoji);
-                setOpen(false);
-              }}
-              className={classNames(
-                "flex h-8 w-8 items-center justify-center text-lg transition-transform hover:scale-125 focus:scale-125 focus:outline-none",
-                myReaction === emoji ? "bg-retro-yellow" : "",
-              )}
-            >
-              {emoji}
-            </button>
-          ))}
+        /* `bottom-full` puts this box's bottom edge exactly on the trigger's
+           top edge — no gap to cross. `pb-2` supplies the visual spacing on
+           the far side, inside the box. */
+        <div className="absolute bottom-full right-0 z-50 flex flex-col-reverse pb-2">
+          <div className="neo-sm flex gap-0.5 bg-paper p-1.5">
+            {REACTION_EMOJIS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                aria-label={`React with ${emoji}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  cancelPendingClose();
+                  onReact(emoji);
+                  setOpen(false);
+                }}
+                className={classNames(
+                  "flex h-8 w-8 items-center justify-center text-lg transition-transform hover:scale-125 focus:scale-125 focus:outline-none",
+                  myReaction === emoji ? "bg-retro-yellow" : "",
+                )}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
         </div>
       ) : null}
     </div>
