@@ -1215,9 +1215,16 @@ const ChatPage = () => {
                   containing block that starts below the header instead, so the
                   overlay drops down underneath it.
 
-                  `contents` on mobile leaves the panel a plain in-flow child of
-                  the pane, exactly as before. */}
-              <div className="contents sm:relative sm:h-0 sm:w-full sm:flex-shrink-0">
+                  `sm:block` is load-bearing, not tidying. `contents` on its own
+                  generates no box, and a box-less element cannot be the
+                  containing block for an absolutely positioned child — so
+                  `sm:relative` alone would be inert and the panel would still
+                  resolve `top-0` against the pane, right back over the header.
+                  `sm:block` restores a real (zero-height) box from `sm` up.
+
+                  On mobile `contents` does the opposite job: no box means the
+                  panel is a plain in-flow child of the pane, exactly as before. */}
+              <div className="contents sm:block sm:relative sm:h-0 sm:w-full sm:flex-shrink-0">
                 <CallModal
                   chatId={callChatId}
                   remoteAvatar={currentChatMetadata?.avatar}
