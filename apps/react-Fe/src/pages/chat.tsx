@@ -1205,13 +1205,26 @@ const ChatPage = () => {
                   </div>
                 }
               </div>
-              {/* Call UI sits below the navbar, not above it. */}
-              <CallModal
-                chatId={callChatId}
-                remoteAvatar={currentChatMetadata?.avatar}
-                remoteName={currentChatMetadata?.title}
-                localAvatar={user?.avatar}
-              />
+              {/* Call UI sits below the navbar, not above it.
+
+                  From `sm` the call panel is `absolute`, so that dragging the
+                  whiteboard resizes it without resizing the message list. That
+                  alone anchored it to `top-0` of the pane — which is the top of
+                  the navbar — and it covered the header as soon as a call
+                  connected. This zero-height anchor gives the absolute panel a
+                  containing block that starts below the header instead, so the
+                  overlay drops down underneath it.
+
+                  `contents` on mobile leaves the panel a plain in-flow child of
+                  the pane, exactly as before. */}
+              <div className="contents sm:relative sm:h-0 sm:w-full sm:flex-shrink-0">
+                <CallModal
+                  chatId={callChatId}
+                  remoteAvatar={currentChatMetadata?.avatar}
+                  remoteName={currentChatMetadata?.title}
+                  localAvatar={user?.avatar}
+                />
+              </div>
               <IncomingCallModal />
               <GroupCallModal chatId={callChatId} />
               <GroupCallNotification />
