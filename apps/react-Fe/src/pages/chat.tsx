@@ -958,7 +958,7 @@ const ChatPage = () => {
                 Add chat
               </button>
 
-              <ThemeToggle className="ml-auto sm:ml-0" />
+              <ThemeToggle className="ml-auto" />
             </div>
             <Input
               placeholder="Search user or group..."

@@ -191,7 +191,7 @@ const MessageItem: React.FC<{
                         <div>
                             <div
                                 className={classNames(
-                                    "grid max-w-xl gap-2",
+                                    "grid w-full gap-2",
                                     message.attachments?.length === 1
                                         ? " grid-cols-1"
                                         : "",
@@ -295,7 +295,7 @@ const MessageItem: React.FC<{
                         <CallMessageBody call={message.call} />
                     ) : message.content ? (
                         <div className="relative flex justify-between">
-                            <p className="text-sm text-ink break-words">{message.content}</p>
+                            <p className="min-w-0 text-sm text-ink break-words">{message.content}</p>
                         </div>
                     ) : null}
                     {/* Stacked reaction chips, sitting on the bubble's bottom
@@ -334,39 +334,40 @@ const MessageItem: React.FC<{
                             </p>
                         )}
                     </div>
+
+                    {/* The reaction toolbar. Hidden until the bubble is hovered, the
+                        way WhatsApp does it — a permanently-visible smiley on every
+                        message is noise. It floats above the bubble's outer edge, on
+                        the side the message is aligned away from, so it never covers
+                        the text. `focus-within` keeps it reachable by keyboard. */}
+                    {canReact ? (
+                        <div
+                            // Clicks on the toolbar must not bubble to the bubble's
+                            // tap handler, or opening the picker would immediately
+                            // toggle the toolbar shut again.
+                            onClick={(e) => e.stopPropagation()}
+                            className={classNames(
+                                // Vertically centred on the bubble and tucked against
+                                // its outer edge — left for own messages, right for
+                                // received ones, so it reads as attached to the
+                                // message rather than floating near it.
+                                "absolute top-1/2 z-40 -translate-y-1/2 transition-opacity duration-100",
+                                isOwnMessage ? "-left-2" : "-right-2",
+                                "pointer-events-none opacity-0",
+                                "group-hover:pointer-events-auto group-hover:opacity-100",
+                                "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                                touchOpen ? "pointer-events-auto opacity-100" : "",
+                            )}
+                        >
+                            <ReactionTrigger
+                                onReact={handleReact}
+                                myReaction={myReaction}
+                                onMore={openEmojiPicker}
+                            />
+                        </div>
+                    ) : null}
                 </div>
 
-                {/* The reaction toolbar. Hidden until the bubble is hovered, the
-                    way WhatsApp does it — a permanently-visible smiley on every
-                    message is noise. It floats above the bubble's outer edge, on
-                    the side the message is aligned away from, so it never covers
-                    the text. `focus-within` keeps it reachable by keyboard. */}
-                {canReact ? (
-                    <div
-                        // Clicks on the toolbar must not bubble to the bubble's
-                        // tap handler, or opening the picker would immediately
-                        // toggle the toolbar shut again.
-                        onClick={(e) => e.stopPropagation()}
-                        className={classNames(
-                            // Vertically centred on the bubble and tucked against
-                            // its outer edge — left for own messages, right for
-                            // received ones, so it reads as attached to the
-                            // message rather than floating near it.
-                            "absolute top-1/2 z-40 -translate-y-1/2 transition-opacity duration-100",
-                            isOwnMessage ? "-left-2" : "-right-2",
-                            "pointer-events-none opacity-0",
-                            "group-hover:pointer-events-auto group-hover:opacity-100",
-                            "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-                            touchOpen ? "pointer-events-auto opacity-100" : "",
-                        )}
-                    >
-                        <ReactionTrigger
-                            onReact={handleReact}
-                            myReaction={myReaction}
-                            onMore={openEmojiPicker}
-                        />
-                    </div>
-                ) : null}
             </div>
 
             {/* The full picker, opened from the trigger's "+". Portaled, so the
