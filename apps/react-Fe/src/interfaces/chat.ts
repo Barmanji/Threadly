@@ -12,15 +12,24 @@ export interface ChatListItemInterface {
 }
 
 /**
- * One user's reaction to a message.
+ * One entry in a message's reaction list.
  *
- * `user` arrives already populated by the server aggregation, so it carries a
- * username and avatar rather than just an id. It stays optional because a
- * reaction from a since-deleted user keeps only its raw id.
+ * A reaction is stored as `{ user: ObjectId, emoji }`, and the server's
+ * aggregation resolves the reactor into *sibling* fields rather than nesting it
+ * under `user` — so a reaction actually arrives as
+ * `{ user: "<id>", emoji, _id, username, avatar }`. The resolved fields are
+ * optional because a reaction from a since-deleted user keeps only the raw id.
+ *
+ * This matters: reading `user.username` here yields `undefined`, because
+ * `user` is a bare id string. Both the id match and the display name have to
+ * come from the fields the server actually sends.
  */
 export interface MessageReactionInterface {
-  user: Partial<Pick<UserInterface, "_id" | "avatar" | "username">> & { _id?: string };
+  user: string;
   emoji: string;
+  _id?: string;
+  username?: string;
+  avatar?: string;
 }
 
 /**

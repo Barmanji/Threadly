@@ -38,6 +38,7 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import type {
   ChatListItemInterface,
   ChatMessageInterface,
+  MessageReactionInterface,
 } from "../interfaces/chat";
 import {
   LocalStorage,
@@ -599,15 +600,17 @@ const ChatPage = () => {
 
     const userId = user?._id ?? "";
     const existing = message.reactions ?? [];
-    const mine = existing.find(
-      (r) => String(r.user?._id) === String(userId),
-    );
+    // The reactor's id is the raw string in `user`; the resolved profile sits in
+    // sibling fields. Matching on a nested `user._id` never matches anything,
+    // which is what made a second tap on the same emoji append a duplicate
+    // instead of removing it.
+    const isMine = (r: MessageReactionInterface) =>
+      String(r.user) === userId;
+    const mine = existing.find(isMine);
     const isRemoving = mine?.emoji === emoji;
 
     // Everyone except the current user keeps their entry, unchanged.
-    const others = existing.filter(
-      (r) => String(r.user?._id) !== String(userId),
-    );
+    const others = existing.filter((r) => !isMine(r));
 
     const optimistic: ChatMessageInterface = {
       ...message,
@@ -615,13 +618,14 @@ const ChatPage = () => {
         ? others
         : [
             ...others,
+            // Shaped exactly like the server's, so the chip that appears on
+            // this frame is indistinguishable from the reconciled one.
             {
               emoji,
-              user: {
-                _id: userId,
-                username: user?.username ?? "",
-                avatar: user?.avatar ?? "",
-              },
+              user: userId,
+              _id: userId,
+              username: user?.username ?? "",
+              avatar: user?.avatar ?? "",
             },
           ],
     };
