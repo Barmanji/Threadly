@@ -603,8 +603,20 @@ const CallModal: React.FC<CallModalProps> = ({
 
           {/* Faces and controls share a row on mobile. `sm:contents` removes
               this wrapper on desktop so both become plain flex items of the row
-              above, leaving that layout byte-identical. */}
-          <div className="order-2 flex min-h-0 flex-row sm:contents">
+              above, leaving that layout byte-identical.
+
+              `border-t-4` draws the rule that separates the board from the faces
+              below it on a phone, where the board is stacked on top and this
+              row sits under it. On desktop the same rule is drawn by the
+              absolute children inside the avatars column and the control strip,
+              level with the toolbar's own underline.
+
+              `sm:border-t-0` is a guard, not tidying. `sm:contents` generates no
+              box, so this border would not paint on desktop anyway — but that
+              safety currently rests on a subtlety. Stating it explicitly means
+              that if `sm:contents` is ever swapped for a real box, this rule
+              cannot silently reappear on desktop. */}
+          <div className="order-2 flex min-h-0 flex-row border-t-4 border-ink sm:contents sm:border-t-0">
             {/* Avatars — a horizontal pair on mobile, the original column from
                 `sm` up. The 192px column left the board ~127px wide on a phone.
                 `sm:flex-none` restores `flex: 0 0 auto`: the mobile `flex-1`
