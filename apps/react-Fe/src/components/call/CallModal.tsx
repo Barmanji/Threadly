@@ -342,7 +342,7 @@ const CallModal: React.FC<CallModalProps> = ({
   // Video call: resizable layout with drag handle.
   if (callType === "video") {
     return (
-      <div className="relative z-10 w-full border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+      <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
         <div
           className="relative flex w-full flex-col items-center justify-center gap-4 p-4"
           style={{ height: whiteboardHeight }}
@@ -490,7 +490,7 @@ const CallModal: React.FC<CallModalProps> = ({
 
   // Audio call: whiteboard always mounted (hidden via CSS), toggled by user.
   return (
-    <div className="relative z-10 w-full border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+    <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
       {/* Route the remote audio to the speakers */}
       {remoteStream && (
         <audio

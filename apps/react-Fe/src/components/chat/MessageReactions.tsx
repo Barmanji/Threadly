@@ -198,7 +198,7 @@ export const ReactionTrigger: React.FC<ReactionTriggerProps> = ({
           e.stopPropagation();
           setOpen((prev) => !prev);
         }}
-        className="flex h-7 w-7 items-center justify-center rounded-full bg-ink/5 text-ink/40 transition-colors hover:bg-ink/10 hover:text-ink"
+        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full border-2 border-ink bg-paper text-ink/60 shadow-[2px_2px_0_0_var(--color-ink)] transition-colors hover:bg-retro-yellow hover:text-ink"
       >
         <FaceSmileIcon className="h-4 w-4" />
       </button>

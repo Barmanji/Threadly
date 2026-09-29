@@ -133,7 +133,7 @@ const MessageItem: React.FC<{
                 className={classNames(
                     // `group` wraps both the bubble and the reaction toolbar, so
                     // hovering either one reveals the other.
-                    "group relative flex w-full max-w-lg justify-start items-end gap-3",
+                    "group relative flex w-full max-w-[86%] justify-start items-end gap-3 sm:max-w-lg",
                     isOwnMessage ? "ml-auto flex-row-reverse" : "",
                 )}
             >
@@ -143,7 +143,7 @@ const MessageItem: React.FC<{
                 />
                 <div
                     className={classNames(
-                        "relative min-w-0 p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
+                        "relative min-w-0 max-w-full overflow-hidden p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
                         isOwnMessage
                             ? "rounded-tr-none bg-retro-orange pr-10"
                             : "rounded-tl-none bg-paper",
@@ -352,7 +352,7 @@ const MessageItem: React.FC<{
                                 // received ones, so it reads as attached to the
                                 // message rather than floating near it.
                                 "absolute top-1/2 z-40 -translate-y-1/2 transition-opacity duration-100",
-                                isOwnMessage ? "-left-3" : "-right-3",
+                                isOwnMessage ? "-left-4" : "-right-4",
                                 "pointer-events-none opacity-0",
                                 "group-hover:pointer-events-auto group-hover:opacity-100",
                                 "group-focus-within:pointer-events-auto group-focus-within:opacity-100",

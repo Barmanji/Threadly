@@ -1035,20 +1035,8 @@ const ChatPage = () => {
         >
           {currentChat.current && currentChat.current?._id ? (
             <>
-              {/* Call UI is scoped to the conversation, as it always was. At
-                  page level the modals overlay the whole window and cover the
-                  sidebar; here they cover only the chat pane. */}
-              <CallModal
-                chatId={callChatId}
-                remoteAvatar={currentChatMetadata?.avatar}
-                remoteName={currentChatMetadata?.title}
-                localAvatar={user?.avatar}
-              />
-              <GroupCallModal chatId={callChatId} />
-              <GroupCallNotification />
-              <IncomingCallModal />
               <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
-                <div className="flex justify-start items-center min-w-0 gap-3 sm:w-max">
+                <div className="flex justify-start items-center min-w-0 gap-3">
                   {isMobile ? (
                     <button
                       type="button"
@@ -1180,10 +1168,21 @@ const ChatPage = () => {
                   </div>
                 }
               </div>
+              {/* Call UI sits below the navbar, not above it. */}
+              <CallModal
+                chatId={callChatId}
+                remoteAvatar={currentChatMetadata?.avatar}
+                remoteName={currentChatMetadata?.title}
+                localAvatar={user?.avatar}
+              />
+              <IncomingCallModal />
+              <GroupCallModal chatId={callChatId} />
+              <GroupCallNotification />
+
               <div className="relative w-full flex-1 min-h-0">
                 <div
                   className={classNames(
-                    "bg-doodle p-8 overflow-y-auto flex flex-col-reverse gap-6 w-full h-full",
+                    "bg-doodle p-8 overflow-x-hidden overflow-y-auto flex flex-col-reverse gap-6 w-full h-full",
                   )}
                   id="message-window"
                 >
