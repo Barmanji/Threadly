@@ -1,10 +1,9 @@
-import { FaceSmileIcon } from "@heroicons/react/20/solid";
+import { PlusIcon, XMarkIcon } from "@heroicons/react/20/solid";
 import { useEffect, useRef, useState } from "react";
 import type { MessageReactionInterface } from "../../interfaces/chat";
 import { classNames } from "../../utils";
-
-/** The emojis offered in the picker. Must mirror the server's allow-list. */
-export const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🔥"] as const;
+import EmojiPicker from "./EmojiPicker";
+import { QUICK_REACTIONS } from "./reactionEmojis";
 
 interface ReactionGroup {
   emoji: string;
@@ -58,133 +57,93 @@ interface ReactionPickerProps {
 }
 
 /**
- * The emoji trigger plus its popover.
+ * The quick reaction row, plus the full picker behind a "+".
  *
- * Rendered inside the bubble, positioned above it, and kept open on hover so
- * a reaction can be chosen without a second click. Touch devices have no
- * hover, so the button toggles the popover as well.
- *
- * Two details make the hover actually usable:
- *
- *  - The popover's box is flush against the trigger. An earlier version put an
- *    8px margin between them, and `margin` is not part of an element's hit
- *    area — the pointer crossed that gap, `mouseleave` fired, and the popover
- *    unmounted before the cursor arrived. It was unreachable, not just fiddly.
- *    The gap is now padding on the far side, so trigger and popover are one
- *    continuous box.
- *
- *  - Closing is deferred briefly, so a flick that clips a corner on the way up
- *    doesn't kill the popover mid-trajectory.
+ * This is the hover toolbar that floats over a bubble — it is not rendered
+ * inline in the message footer, because a permanently-visible smiley button on
+ * every message is noise. See `MessageItem` for the hover wiring.
  */
 const ReactionPicker: React.FC<ReactionPickerProps> = ({
   onReact,
   myReaction,
   disabled,
 }) => {
-  const [open, setOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const cancelPendingClose = () => {
-    if (closeTimer.current === null) return;
-    clearTimeout(closeTimer.current);
-    closeTimer.current = null;
-  };
-
-  // Hover-open is only wired up where hovering is a real, separate gesture.
-  // On touch, `mouseenter` arrives as part of the tap, so leaving it enabled
-  // would close the popover the instant the finger lifted.
-  const canHover =
-    typeof window !== "undefined" &&
-    window.matchMedia("(hover: hover)").matches;
-
-  const openNow = () => {
-    cancelPendingClose();
-    setOpen(true);
-  };
-
-  const closeSoon = () => {
-    cancelPendingClose();
-    closeTimer.current = setTimeout(() => {
-      closeTimer.current = null;
-      setOpen(false);
-    }, 150);
-  };
-
-  // Close on an outside click or Escape rather than leaving the popover
-  // stranded over the message list.
+  // Close the full picker on an outside click or Escape. The quick row itself
+  // is a hover surface and closes on mouse-out; the picker is a dialog and
+  // needs an explicit way out.
   useEffect(() => {
-    if (!open) return;
+    if (!pickerOpen) return;
 
-    const onPointerDown = (e: MouseEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) {
-        cancelPendingClose();
-        setOpen(false);
-      }
+    const onPointerDown = (e: PointerEvent) => {
+      if (wrapRef.current?.contains(e.target as Node)) return;
+      setPickerOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      cancelPendingClose();
-      setOpen(false);
+      if (e.key === "Escape") setPickerOpen(false);
     };
 
-    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open]);
+  }, [pickerOpen]);
 
-  // A pending close that fires after unmount would be a state update on a dead
-  // component — and on a message that scrolled away, that means nothing at all.
-  useEffect(() => cancelPendingClose, []);
+  const togglePicker = (e: React.MouseEvent<HTMLButtonElement>) => {
+    // Remember the trigger so the picker can position against it.
+    setAnchor(e.currentTarget);
+    setPickerOpen((prev) => !prev);
+  };
 
   return (
-    <div
-      ref={wrapRef}
-      className="relative"
-      onMouseEnter={canHover ? openNow : undefined}
-      onMouseLeave={canHover ? closeSoon : undefined}
-    >
-      <button
-        type="button"
-        aria-label="React to this message"
-        aria-expanded={open}
-        disabled={disabled}
-        onClick={() => setOpen((prev) => !prev)}
-        className="flex h-6 w-6 items-center justify-center rounded-full bg-ink/5 text-ink/60 transition-colors hover:bg-ink/15 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+    <div ref={wrapRef} className="relative">
+      <div
+        className={classNames(
+          "neo-sm flex items-center gap-0.5 bg-paper p-1",
+          disabled ? "pointer-events-none opacity-50" : "",
+        )}
       >
-        <FaceSmileIcon className="h-4 w-4" />
-      </button>
+        {QUICK_REACTIONS.map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            title={`React with ${emoji}`}
+            onClick={() => onReact(emoji)}
+            className={classNames(
+              "flex h-7 w-7 items-center justify-center rounded-sm text-base transition-transform hover:scale-125 focus:scale-125 focus:outline-none",
+              myReaction === emoji ? "bg-retro-yellow" : "",
+            )}
+          >
+            {emoji}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={togglePicker}
+          aria-label="More emoji"
+          aria-expanded={pickerOpen}
+          title="More emoji"
+          className="flex h-7 w-7 items-center justify-center rounded-sm text-ink/50 transition-colors hover:bg-ink/10 hover:text-ink"
+        >
+          <PlusIcon className="h-4 w-4" />
+        </button>
+      </div>
 
-      {open ? (
-        /* `bottom-full` puts this box's bottom edge exactly on the trigger's
-           top edge — no gap to cross. `pb-2` supplies the visual spacing on
-           the far side, inside the box. */
-        <div className="absolute bottom-full right-0 z-50 flex flex-col-reverse pb-2">
-          <div className="neo-sm flex gap-0.5 bg-paper p-1.5">
-            {REACTION_EMOJIS.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                aria-label={`React with ${emoji}`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cancelPendingClose();
-                  onReact(emoji);
-                  setOpen(false);
-                }}
-                className={classNames(
-                  "flex h-8 w-8 items-center justify-center text-lg transition-transform hover:scale-125 focus:scale-125 focus:outline-none",
-                  myReaction === emoji ? "bg-retro-yellow" : "",
-                )}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        </div>
+      {pickerOpen && anchor ? (
+        <EmojiPicker
+          anchor={anchor}
+          onClose={() => setPickerOpen(false)}
+          onPick={(emoji) => {
+            onReact(emoji);
+            setPickerOpen(false);
+          }}
+          myReaction={myReaction}
+        />
       ) : null}
     </div>
   );
@@ -221,9 +180,11 @@ export const ReactionChips: React.FC<ReactionChipsProps> = ({
           type="button"
           disabled={disabled}
           title={
-            group.names.length > 0
-              ? group.names.join(", ")
-              : `${group.count} reaction${group.count === 1 ? "" : "s"}`
+            group.includesMe
+              ? `You reacted ${group.emoji} — click to remove it`
+              : group.names.length > 0
+                ? group.names.join(", ")
+                : `${group.count} reaction${group.count === 1 ? "" : "s"}`
           }
           onClick={(e) => {
             e.stopPropagation();
@@ -231,7 +192,8 @@ export const ReactionChips: React.FC<ReactionChipsProps> = ({
             if (group.includesMe) onReact(group.emoji);
           }}
           className={classNames(
-            "inline-flex items-center gap-1 border-2 px-1.5 py-0.5 text-xs leading-none transition-colors",
+            // `group` is what the removal badge keys its hover state off.
+            "group relative inline-flex items-center gap-1 border-2 px-1.5 py-0.5 text-xs leading-none transition-colors",
             group.includesMe
               ? "cursor-pointer border-ink bg-retro-yellow"
               : "cursor-default border-ink/30 bg-ink/5",
@@ -241,6 +203,16 @@ export const ReactionChips: React.FC<ReactionChipsProps> = ({
           <span aria-hidden="true">{group.emoji}</span>
           {group.count > 1 ? (
             <span className="font-bold tabular-nums">{group.count}</span>
+          ) : null}
+          {/* Removal affordance. Clicking your own reaction already removed it,
+              but nothing said so — the chip looked the same as everyone else's. */}
+          {group.includesMe ? (
+            <span
+              aria-hidden="true"
+              className="absolute -right-1.5 -top-1.5 hidden h-4 w-4 items-center justify-center rounded-full border-2 border-ink bg-retro-red text-paper group-hover:flex"
+            >
+              <XMarkIcon className="h-2.5 w-2.5" />
+            </span>
           ) : null}
         </button>
       ))}

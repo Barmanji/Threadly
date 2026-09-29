@@ -100,7 +100,7 @@ const MessageItem: React.FC<{
                 />
                 <div
                     className={classNames(
-                        " relative p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
+                        "group relative p-4 flex flex-col cursor-pointer border-2 border-ink shadow-[3px_3px_0_0_var(--color-ink)]",
                         isOwnMessage
                             ? "rounded-tr-none bg-retro-orange pr-10"
                             : "rounded-tl-none bg-paper",
@@ -290,14 +290,30 @@ const MessageItem: React.FC<{
                                 ago
                             </p>
                         )}
-                        {canReact ? (
-                            <ReactionPicker
-                                onReact={handleReact}
-                                myReaction={myReaction}
-                            />
-                        ) : null}
                     </div>
                 </div>
+
+                {/* The reaction toolbar. Hidden until the bubble is hovered, the
+                    way WhatsApp does it — a permanently-visible smiley on every
+                    message is noise. It floats above the bubble's outer edge, on
+                    the side the message is aligned away from, so it never covers
+                    the text. `focus-within` keeps it reachable by keyboard. */}
+                {canReact ? (
+                    <div
+                        className={classNames(
+                            "absolute -top-3 z-40 transition-opacity duration-100",
+                            isOwnMessage ? "left-0" : "right-0",
+                            "pointer-events-none opacity-0",
+                            "group-hover:pointer-events-auto group-hover:opacity-100",
+                            "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                        )}
+                    >
+                        <ReactionPicker
+                            onReact={handleReact}
+                            myReaction={myReaction}
+                        />
+                    </div>
+                ) : null}
             </div>
 
             <RetroConfirm

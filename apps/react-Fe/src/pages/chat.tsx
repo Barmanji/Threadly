@@ -1,6 +1,7 @@
 import {
   ChevronLeftIcon,
   DocumentIcon,
+  FaceSmileIcon,
   EllipsisVerticalIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
@@ -32,6 +33,7 @@ import IncomingCallModal from "../components/call/IncomingCallModal";
 import GroupCallModal from "../components/call/GroupCallModal";
 import GroupCallNotification from "../components/call/GroupCallNotification";
 import ThemeToggle from "../components/ThemeToggle";
+import EmojiPicker from "../components/chat/EmojiPicker";
 import { useIsMobile } from "../hooks/useIsMobile";
 import type {
   ChatListItemInterface,
@@ -114,6 +116,13 @@ const ChatPage = () => {
   const [selfTyping, setSelfTyping] = useState(false); // To track if the current user is typing
 
   const [message, setMessage] = useState(""); // To store the currently typed message
+
+  // The composer's emoji picker. `anchor` is the button that opened it, so the
+  // picker can position against it; the input ref is what an emoji gets
+  // inserted into.
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [emojiAnchor, setEmojiAnchor] = useState<HTMLButtonElement | null>(null);
+  const messageInputRef = useRef<HTMLInputElement | null>(null);
   const [localSearchQuery, setLocalSearchQuery] = useState(""); // For local search functionality
 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]); // To store files attached to messages
@@ -295,6 +304,35 @@ const ChatPage = () => {
       },
       (err) => toast.error(err),
     );
+  };
+
+  /**
+   * Insert an emoji at the caret, or append it when the input isn't focused.
+   *
+   * Appending alone would drop the emoji at the end of a half-typed sentence,
+   * which is the one thing an emoji picker must not do.
+   */
+  const insertEmoji = (emoji: string) => {
+    const input = messageInputRef.current;
+
+    if (!input) {
+      setMessage((prev) => prev + emoji);
+      return;
+    }
+
+    const start = input.selectionStart ?? message.length;
+    const end = input.selectionEnd ?? message.length;
+    const next = message.slice(0, start) + emoji + message.slice(end);
+
+    setMessage(next);
+
+    // Move the caret past the inserted emoji. Done after the state update so it
+    // applies to the new value, not the old one.
+    requestAnimationFrame(() => {
+      input.focus();
+      const caret = start + emoji.length;
+      input.setSelectionRange(caret, caret);
+    });
   };
 
   const handleOnMessageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1253,6 +1291,20 @@ const ChatPage = () => {
                   <PaperClipIcon className="w-6 h-6" />
                 </label>
 
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    setEmojiAnchor(e.currentTarget);
+                    setEmojiPickerOpen((prev) => !prev);
+                  }}
+                  aria-label="Insert an emoji"
+                  aria-expanded={emojiPickerOpen}
+                  title="Insert an emoji"
+                  className="neo-sm neo-press block cursor-pointer rounded-sm bg-cream p-4 text-ink hover:bg-retro-yellow"
+                >
+                  <FaceSmileIcon className="w-6 h-6" />
+                </button>
+
                 <Input
                   placeholder="Message"
                   value={message}
@@ -1262,6 +1314,7 @@ const ChatPage = () => {
                       sendChatMessage();
                     }
                   }}
+                  ref={messageInputRef}
                 />
                 <button
                   onClick={sendChatMessage}
@@ -1271,6 +1324,20 @@ const ChatPage = () => {
                   <PaperAirplaneIcon className="w-6 h-6" />
                 </button>
               </div>
+
+              {/* Same picker as the bubble toolbar, opened from the composer.
+                  Picking inserts at the caret rather than reacting to a message. */}
+              {emojiPickerOpen && emojiAnchor ? (
+                <EmojiPicker
+                  anchor={emojiAnchor}
+                  placement="top"
+                  onClose={() => setEmojiPickerOpen(false)}
+                  onPick={(emoji) => {
+                    insertEmoji(emoji);
+                    setEmojiPickerOpen(false);
+                  }}
+                />
+              ) : null}
             </>
           ) : (
             <div className="w-full h-full flex justify-center items-center">
