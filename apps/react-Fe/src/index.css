@@ -184,6 +184,48 @@ input[type="file"]::file-selector-button:active {
     opacity: 0.08;
     pointer-events: none;
   }
+
+  /*
+   * Opt-in variant for when the doodle host is ALSO the scroll container
+   * (the login and register roots: `h-dvh overflow-y-auto bg-doodle`).
+   *
+   * The rule above is `position: absolute; inset: 0`, and `inset: 0` resolves
+   * against the host's padding box. For a scrolling host that box is only the
+   * visible slice, so the doodle came out exactly one viewport tall and then
+   * scrolled away with the content — anything past the fold rendered on bare
+   * cream. Measured on the register root: 673px of doodle over 923px of
+   * content, and once scrolled to the bottom the whole viewport was bare.
+   *
+   * `sticky` pins the layer to the top of the scrollport instead, so one
+   * viewport of doodle keeps covering the viewport at every scroll offset. It
+   * is still `z-index: -1`, so content keeps painting over it.
+   *
+   * The two non-obvious declarations are both load-bearing, and both were
+   * measured rather than reasoned about — the auth roots are column flex
+   * containers, so this `::before` is a flex item:
+   *   - `flex: 0 0 auto` — as a flex item it defaults to `flex: 0 1 auto`, so a
+   *     specified height gets shrunk to nothing when the content is tall. Left
+   *     alone the layer measured 0px tall.
+   *   - `height: 100dvh` — `height: 100%` resolves against the host's *content*
+   *     box, which is the `py-10` smaller: 593px of doodle over a 673px
+   *     viewport, leaving the bottom 80px bare. The host is `h-dvh`, so the
+   *     viewport unit matches it exactly.
+   *
+   * Only sizing and positioning are overridden — the mask, opacity, colour and
+   * pointer-events all still come from `.bg-doodle::before` above, so the two
+   * cannot drift apart. Deliberately opt-in: the chat's message window scrolls
+   * too and has the same latent gap, but it is not `h-dvh` and changing its
+   * background is a visible change that was not asked for.
+   */
+  .bg-doodle.bg-doodle-scroll::before {
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    flex: 0 0 auto;
+    height: 100dvh;
+  }
 }
 
 @keyframes bounce {
