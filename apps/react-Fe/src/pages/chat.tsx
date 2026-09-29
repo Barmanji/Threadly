@@ -61,6 +61,16 @@ const MESSAGE_DELETE_EVENT = "messageDeleted";
 const MESSAGE_REACTION_EVENT = "messageReacted";
 // const SOCKET_ERROR_EVENT = "socketError";
 
+// Widths the resizable sidebar is held between. The conversation keeps at least
+// CHAT_MIN_WIDTH, which is what stops the header's call buttons from being
+// squeezed off the right edge when the sidebar is dragged wide.
+const SIDEBAR_MIN_WIDTH = 240;
+const CHAT_MIN_WIDTH = 320;
+
+/** Widest the sidebar may get, leaving CHAT_MIN_WIDTH for the conversation. */
+const maxSidebarWidth = (): number =>
+  Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - CHAT_MIN_WIDTH);
+
 // Fallback label when a typing event arrives without sender details.
 const isTypingGroupFallbackName = (isGroupChat?: boolean) =>
   isGroupChat ? "someone" : "";
@@ -840,8 +850,23 @@ const ChatPage = () => {
 
   // Resizable sidebar: width in px (defaults to ~1/3 of the viewport).
   const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
-    typeof window !== "undefined" ? Math.round(window.innerWidth / 3) : 420,
+    typeof window !== "undefined"
+      ? Math.min(
+          Math.round(window.innerWidth / 3),
+          Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - CHAT_MIN_WIDTH),
+        )
+      : 420,
   );
+
+  // Narrowing the window has to pull the sidebar in with it. It's a fixed pixel
+  // width with flex-shrink-0, so without this it keeps the width it had at the
+  // old viewport size, crushes the conversation into a sliver, and the header's
+  // call buttons get pushed out of view.
+  useEffect(() => {
+    const onResize = () => setSidebarWidth((prev) => Math.min(prev, maxSidebarWidth()));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   // On a phone the sidebar and the conversation can't sit side by side, so the
   // layout becomes one screen at a time: the chat list until a chat is tapped,
@@ -888,9 +913,12 @@ const ChatPage = () => {
     const startX = e.clientX;
     const startWidth = sidebarWidth;
     const onMove = (moveEvent: MouseEvent) => {
+      // Clamp to the upper bound last: applied the other way round, a window
+      // narrower than SIDEBAR_MIN_WIDTH + CHAT_MIN_WIDTH produced a maximum
+      // below the minimum, and the sidebar could be dragged under 240px.
       const next = Math.min(
-        Math.max(startWidth + (moveEvent.clientX - startX), 240),
-        window.innerWidth - 480,
+        Math.max(startWidth + (moveEvent.clientX - startX), SIDEBAR_MIN_WIDTH),
+        maxSidebarWidth(),
       );
       setSidebarWidth(next);
     };
@@ -1029,14 +1057,19 @@ const ChatPage = () => {
         )}
         <div
           className={classNames(
-            "relative flex-1 flex flex-col min-h-0",
+            // min-w-0 is load-bearing: this is a flex child in a row, so its
+            // default min-width:auto would stop it shrinking and let the header
+            // overflow the pane, which then gets clipped by the row's
+            // overflow-hidden. That clipping is what pushed the call buttons off
+            // the right edge.
+            "relative flex-1 flex flex-col min-h-0 min-w-0",
             isMobile && !isChatOpen ? "hidden" : "",
           )}
         >
           {currentChat.current && currentChat.current?._id ? (
             <>
               <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
-                <div className="flex justify-start items-center min-w-0 gap-3">
+                <div className="flex justify-start items-center min-w-0 flex-1 gap-3">
                   {isMobile ? (
                     <button
                       type="button"
