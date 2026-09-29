@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { ArrowLeftIcon } from "@heroicons/react/20/solid";
 import { useAuth } from "../context/AuthContext";
+import ThemeToggle from "../components/ThemeToggle";
 
 /**
  * One themed group of changes. `ref` is the commit that introduced it, shown as
@@ -264,7 +265,7 @@ const Changelog: React.FC = () => {
   const backTo = token && user?._id ? "/chat" : "/";
 
   return (
-    <div className="flex min-h-dvh flex-col bg-cream">
+    <div className="relative flex min-h-dvh flex-col bg-cream">
       <header className="border-b-4 border-ink bg-cream px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))]">
         <button
           type="button"
@@ -275,6 +276,14 @@ const Changelog: React.FC = () => {
           Back
         </button>
       </header>
+
+      {/* Same `absolute right-4 top-4 z-20 flex items-center gap-3` row the hero,
+          login and register use, so the toggle lands in the identical spot on
+          every page. No ChangelogLink beside it here — this IS the changelog,
+          and a link to yourself is noise. */}
+      <div className="absolute right-4 top-4 z-20 flex items-center gap-3">
+        <ThemeToggle />
+      </div>
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-12 px-4 pb-[max(2rem,env(safe-area-inset-bottom))] pt-8">
         <div className="flex flex-col gap-3">
