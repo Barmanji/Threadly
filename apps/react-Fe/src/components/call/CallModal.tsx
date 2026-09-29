@@ -58,6 +58,9 @@ const CallModal: React.FC<CallModalProps> = ({
   const draggingRef = useRef(false);
   const dragStartYRef = useRef(0);
   const dragStartHRef = useRef(0);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Reset whiteboard when a new call starts so stale state doesn't carry over.
   useEffect(() => {
@@ -79,6 +82,22 @@ const CallModal: React.FC<CallModalProps> = ({
   // the remote peer's toggle, so we rely on the signaling path.
   const remoteVideoOn = !remoteVideoOff;
   const remoteAudioOn = !remoteMuted;
+
+  // `autoPlay` on its own is not enough to guarantee a picture. A media element
+  // whose srcObject is assigned after insertion can sit on frame 0 forever, and
+  // both tiles remount whenever the stream id or a video toggle changes (see
+  // their `key` props), which restarts playback from scratch. Nudging play()
+  // whenever an element or its stream changes covers both cases. The rejection
+  // is swallowed on purpose: a not-yet-playable element just means no track is
+  // attached yet, and the next stream change retries.
+  useEffect(() => {
+    const elements = [
+      remoteVideoRef.current,
+      localVideoRef.current,
+      remoteAudioRef.current,
+    ];
+    for (const el of elements) void el?.play().catch(() => {});
+  }, [remoteStream, localStream, isVideoEnabled, remoteVideoOn, isCallActive]);
 
   // Listen for the peer opening/closing the shared whiteboard.
   // Only active during an active call to avoid picking up stale events.
@@ -235,7 +254,16 @@ const CallModal: React.FC<CallModalProps> = ({
               key={`${remoteStream.id}-${remoteVideoOn}`}
               autoPlay
               playsInline
+              // Muted on purpose. This element is video-only: the remote audio
+              // track is played by the dedicated <audio> below. Browsers refuse
+              // to autoplay unmuted media once the gesture that started the call
+              // has expired — which it always has by the time signalling
+              // finishes — so an unmuted element renders as a black frame. Muted
+              // autoplay is always permitted, and nothing is lost because the
+              // audio moved to its own element.
+              muted
               ref={(video) => {
+                remoteVideoRef.current = video;
                 if (video && video.srcObject !== remoteStream)
                   video.srcObject = remoteStream;
               }}
@@ -303,6 +331,7 @@ const CallModal: React.FC<CallModalProps> = ({
             playsInline
             muted
             ref={(video) => {
+              localVideoRef.current = video;
               if (video && video.srcObject !== localStream)
                 video.srcObject = localStream;
             }}
@@ -343,6 +372,21 @@ const CallModal: React.FC<CallModalProps> = ({
   if (callType === "video") {
     return (
       <div className="relative z-10 w-full flex-shrink-0 border-b-4 border-ink bg-retro-yellow shadow-[0_6px_0_0_var(--color-ink)]">
+        {/* Route the remote audio to the speakers. The tiles are muted
+            (see remoteTile), so without this the peer's voice is dropped
+            entirely in a video call. */}
+        {remoteStream && (
+          <audio
+            autoPlay
+            playsInline
+            className="pointer-events-none absolute h-0 w-0 opacity-0"
+            ref={(audio) => {
+              remoteAudioRef.current = audio;
+              if (audio && audio.srcObject !== remoteStream)
+                audio.srcObject = remoteStream;
+            }}
+          />
+        )}
         <div
           className="relative flex w-full flex-col items-center justify-center gap-4 p-4"
           style={{ height: whiteboardHeight }}
