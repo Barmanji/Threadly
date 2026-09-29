@@ -1,4 +1,5 @@
 import {
+  ChevronLeftIcon,
   DocumentIcon,
   EllipsisVerticalIcon,
   PaperAirplaneIcon,
@@ -31,6 +32,7 @@ import IncomingCallModal from "../components/call/IncomingCallModal";
 import GroupCallModal from "../components/call/GroupCallModal";
 import GroupCallNotification from "../components/call/GroupCallNotification";
 import ThemeToggle from "../components/ThemeToggle";
+import { useIsMobile } from "../hooks/useIsMobile";
 import type {
   ChatListItemInterface,
   ChatMessageInterface,
@@ -500,6 +502,7 @@ const ChatPage = () => {
       currentChat.current = null;
       // Remove the currentChat from local storage.
       LocalStorage.remove("currentChat");
+      if (isMobile) setIsChatOpen(false);
     }
     // Update the chats by removing the chat that the user left.
     setChats((prev) => prev.filter((c) => c._id !== chat._id));
@@ -802,6 +805,31 @@ const ChatPage = () => {
     typeof window !== "undefined" ? Math.round(window.innerWidth / 3) : 420,
   );
 
+  // On a phone the sidebar and the conversation can't sit side by side, so the
+  // layout becomes one screen at a time: the chat list until a chat is tapped,
+  // then the chat, with a back button to return. Starts on the list, like every
+  // other messaging app — reopening straight into the last conversation on a
+  // five-inch screen mostly hides the chats you're looking for.
+  const isMobile = useIsMobile();
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
+  // Resizing across the breakpoint shouldn't change which screen you're on —
+  // narrowing a desktop window down to phone width should keep the conversation
+  // open, not eject you back to the list. The first render is skipped on
+  // purpose: a phone opening the app should land on the list, even when a chat
+  // was remembered.
+  const wasMobile = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (wasMobile.current === null) {
+      wasMobile.current = isMobile;
+      return;
+    }
+    if (wasMobile.current !== isMobile) {
+      wasMobile.current = isMobile;
+      if (isMobile) setIsChatOpen(Boolean(currentChat.current?._id));
+    }
+  }, [isMobile]);
+
   // Handles the drag-to-resize gesture on the sidebar handle.
   const onSidebarDragStart = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -838,12 +866,29 @@ const ChatPage = () => {
         }}
       />
 
-      <div className="w-full justify-between items-stretch h-screen flex flex-shrink-0 bg-cream overflow-hidden">
+      {/* Call UI lives outside the conversation branch on purpose. It used to
+          be nested inside it, so closing the chat you're in — or letting the
+          last participant leave a group — unmounted the call window while the
+          call was still live and left the other side talking to nobody. */}
+      <CallModal
+        chatId={callChatId}
+        remoteAvatar={currentChatMetadata?.avatar}
+        remoteName={currentChatMetadata?.title}
+        localAvatar={user?.avatar}
+      />
+      <GroupCallModal chatId={callChatId} />
+      <GroupCallNotification />
+      <IncomingCallModal />
+
+      <div className="w-full justify-between items-stretch h-dvh flex flex-shrink-0 bg-cream overflow-hidden">
         <div
-          className="relative overflow-y-auto flex-shrink-0 bg-cream"
-          style={{ width: sidebarWidth }}
+          className={classNames(
+            "relative overflow-y-auto flex-shrink-0 bg-cream",
+            isMobile ? (isChatOpen ? "" : "w-full") : "",
+          )}
+          style={isMobile ? undefined : { width: sidebarWidth }}
         >
-          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink p-4 flex flex-col justify-between items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <div className="z-10 w-full sticky top-0 bg-cream border-b-4 border-ink px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] flex flex-col justify-between items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4">
             <div className="flex items-center justify-between gap-2 sm:justify-start">
               <button
                 type="button"
@@ -901,12 +946,15 @@ const ChatPage = () => {
                       onClick={(chat) => {
                         if (
                           currentChat.current?._id &&
-                          currentChat.current?._id === chat._id
+                          currentChat.current?._id === chat._id &&
+                          (!isMobile || isChatOpen)
                         )
                           return;
                         LocalStorage.set("currentChat", chat);
                         currentChat.current = chat;
                         setMessage("");
+                        // Takes the place of the sidebar on a phone.
+                        if (isMobile) setIsChatOpen(true);
                         getMessages();
                       }}
                       key={chat._id}
@@ -918,6 +966,9 @@ const ChatPage = () => {
                         if (currentChat.current?._id === chatId) {
                           currentChat.current = null;
                           LocalStorage.remove("currentChat");
+                          // Otherwise the phone is left staring at an empty
+                          // conversation pane with no way back to the list.
+                          if (isMobile) setIsChatOpen(false);
                         }
                       }}
                     />
@@ -927,20 +978,37 @@ const ChatPage = () => {
           </div>
         </div>
         {/* Drag handle to resize the sidebar — ink divider only, with a small centered grip */}
+        {isMobile ? null : (
+          <div
+            onMouseDown={onSidebarDragStart}
+            title="Drag to resize"
+            className="relative z-30 w-1 flex-shrink-0 cursor-col-resize border-l-4 border-ink bg-cream"
+          >
+            <span className="pointer-events-none absolute top-1/2 flex h-7 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm border-2 border-ink bg-paper">
+              <EllipsisVerticalIcon className="h-4 w-3.5 text-ink" />
+            </span>
+          </div>
+        )}
         <div
-          onMouseDown={onSidebarDragStart}
-          title="Drag to resize"
-          className="relative z-30 w-1 flex-shrink-0 cursor-col-resize border-l-4 border-ink bg-cream"
+          className={classNames(
+            "flex-1 flex flex-col min-h-0",
+            isMobile && !isChatOpen ? "hidden" : "",
+          )}
         >
-          <span className="pointer-events-none absolute top-1/2 flex h-7 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm border-2 border-ink bg-paper">
-            <EllipsisVerticalIcon className="h-4 w-3.5 text-ink" />
-          </span>
-        </div>
-        <div className="flex-1 flex flex-col min-h-0">
           {currentChat.current && currentChat.current?._id ? (
             <>
-              <div className="p-4 bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
-                <div className="flex justify-start items-center w-max gap-3">
+              <div className="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] bg-cream z-20 flex flex-shrink-0 justify-between items-center w-full border-b-4 border-ink">
+                <div className="flex justify-start items-center min-w-0 gap-3 sm:w-max">
+                  {isMobile ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsChatOpen(false)}
+                      aria-label="Back to chats"
+                      className="-ml-1 flex h-9 w-9 flex-shrink-0 items-center justify-center text-ink"
+                    >
+                      <ChevronLeftIcon className="h-7 w-7" aria-hidden="true" />
+                    </button>
+                  ) : null}
                   {currentChat.current.isGroupChat ? (
                     <div className="w-14 relative h-14 flex-shrink-0 flex justify-start items-center flex-nowrap">
                       {currentChat.current.participants
@@ -972,11 +1040,11 @@ const ChatPage = () => {
                       }
                     />
                   )}
-                  <div>
-                    <p className="font-extrabold uppercase tracking-wide text-ink">
+                  <div className="min-w-0">
+                    <p className="truncate font-extrabold uppercase tracking-wide text-ink">
                       {getChatObjectMetadata(currentChat.current, user!).title}
                     </p>
-                    <small className="text-ink/60">
+                    <small className="block truncate text-ink/60">
                       {
                         getChatObjectMetadata(currentChat.current, user!)
                           .description
@@ -985,7 +1053,7 @@ const ChatPage = () => {
                   </div>
                 </div>
                 {
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-shrink-0 items-center gap-2">
                     {currentChat.current?.isGroupChat ? (
                       <>
                         <button
@@ -1062,15 +1130,6 @@ const ChatPage = () => {
                   </div>
                 }
               </div>
-              <CallModal
-                chatId={callChatId}
-                remoteAvatar={currentChatMetadata?.avatar}
-                remoteName={currentChatMetadata?.title}
-                localAvatar={user?.avatar}
-              />
-              <GroupCallModal chatId={callChatId} />
-              <GroupCallNotification />
-              <IncomingCallModal />
               <div className="relative w-full flex-1 min-h-0">
                 <div
                   className={classNames(
@@ -1156,7 +1215,7 @@ const ChatPage = () => {
                   })}
                 </div>
               ) : null}
-              <div className="p-4 flex flex-shrink-0 justify-between items-center w-full gap-2 border-t-4 border-ink bg-cream">
+              <div className="px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] flex flex-shrink-0 justify-between items-center w-full gap-2 border-t-4 border-ink bg-cream">
                 <input
                   hidden
                   id="attachments"

@@ -110,7 +110,7 @@ const Login = () => {
   };
 
   return (
-    <div className="relative flex h-screen w-screen flex-col items-center justify-center overflow-y-auto bg-cream px-4 py-10">
+    <div className="relative flex h-dvh w-full flex-col items-center justify-center overflow-y-auto bg-cream px-4 py-10">
       <ThemeToggle className="absolute right-4 top-4" />
       <h1 className="neo rotate-[-2deg] bg-retro-yellow px-6 py-2 text-3xl font-extrabold uppercase tracking-tight text-ink">
         Threadly

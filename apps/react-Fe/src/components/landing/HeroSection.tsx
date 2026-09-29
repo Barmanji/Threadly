@@ -3,7 +3,7 @@ import ThemeToggle from "../ThemeToggle";
 
 export default function HeroSection() {
   return (
-    <section className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-doodle px-4">
+    <section className="relative flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-doodle px-4">
 
       {/* Theme switch, pinned out of the way of the hero content */}
       <div className="absolute right-4 top-4 z-20">
