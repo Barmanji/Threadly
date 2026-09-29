@@ -21,3 +21,27 @@ export interface LoginResponseData {
   refreshToken?: string;
   findUser: UserInterface;
 }
+
+/** What `POST /user/register` returns now that verification is required. */
+export interface RegisterResultData {
+  requiresEmailVerification: boolean;
+  /** Masked address — the server never echoes the full one back. */
+  email: string;
+  expiresInSeconds: number;
+  maxAttempts: number;
+  /** False when the code couldn't be dispatched; offer a resend. */
+  emailSent: boolean;
+}
+
+export interface VerifyEmailResultData {
+  verified: boolean;
+  attemptsRemaining: number;
+  attemptsUsed: number;
+}
+
+export interface ResendCodeResultData {
+  emailSent: boolean;
+  expiresInSeconds: number;
+  maxAttempts: number;
+  cooldownSeconds: number;
+}

@@ -5,7 +5,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from "axios";
 import type { ChatListItemInterface, ChatMessageInterface } from "../interfaces/chat";
-import type { FreeAPISuccessResponseInterface, LoginResponseData } from "../interfaces/api";
+import type { FreeAPISuccessResponseInterface, LoginResponseData, RegisterResultData, ResendCodeResultData, VerifyEmailResultData } from "../interfaces/api";
 import type { UserInterface } from "../interfaces/user";
 import { LocalStorage } from "../utils";
 
@@ -126,12 +126,25 @@ const registerUser = (data: {
     username: string;
     password: string;
     avatar: File | null;
-}): Promise<ApiResponse<LoginResponseData>> => {
+}): Promise<ApiResponse<RegisterResultData>> => {
     return apiClient.post("/user/register", data, {
         headers: {
             "Content-Type": "multipart/form-data",
         },
     });
+};
+
+const verifyEmail = (data: {
+    email: string;
+    code: string;
+}): Promise<ApiResponse<VerifyEmailResultData>> => {
+    return apiClient.post("/user/verify-email", data);
+};
+
+const resendVerificationCode = (data: {
+    email: string;
+}): Promise<ApiResponse<ResendCodeResultData>> => {
+    return apiClient.post("/user/resend-verification", data);
 };
 
 const logoutUser = (): Promise<ApiResponse<LoginResponseData>> => {
@@ -254,7 +267,9 @@ export {
     logoutUser,
     registerUser,
     removeParticipantFromGroup,
+    resendVerificationCode,
     saveWhiteboardState,
     sendMessage,
     updateGroupName,
+    verifyEmail,
 };
