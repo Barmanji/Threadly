@@ -9,7 +9,11 @@ import OtpInput from "../components/OtpInput";
 import ThemeToggle from "../components/ThemeToggle";
 import ChangelogLink from "../components/ChangelogLink";
 import { useAuth } from "../context/AuthContext";
-import { LocalStorage, type ApiFailure } from "../utils";
+import {
+    LocalStorage,
+    maskEmail,
+    type ApiFailure,
+} from "../utils";
 import {
   EMPTY_REGISTER_ERRORS,
   PASSWORD_RULES,
@@ -67,6 +71,21 @@ const Register = () => {
   const [resendIn, setResendIn] = useState(0);
 
   /**
+   * Set when the server rejects the email as already registered, which is
+   * also what happens when the account exists but was never verified — the
+   * case where this form can no longer get the user a code, because a
+   * duplicate is a duplicate whether or not it has been proven yet.
+   *
+   * `problem` carries whatever the resend attempt answered with, so a real
+   * account ("already verified") can say so next to a login link instead of
+   * silently doing nothing.
+   */
+  const [pendingVerification, setPendingVerification] = useState<{
+    email: string;
+    problem?: string;
+  } | null>(null);
+
+  /**
    * "Popup after the user has finished typing the password" — one shot, on
    * the first blur after a pause. Never repeats, and never fires mid-keystroke.
    */
@@ -100,6 +119,12 @@ const Register = () => {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const next: RegisterValues = { ...values, [field]: e.target.value };
       setValues(next);
+
+      // The recovery panel is pinned to one address; changing the address
+      // invalidates it.
+      if (field === "email" && pendingVerification) {
+        setPendingVerification(null);
+      }
 
       // Real-time: re-validate as they type, as soon as the field has
       // content. Empty means "not typed yet", not "wrong".
@@ -152,10 +177,47 @@ const Register = () => {
         [fieldError.path as RegisterField]: true,
       }));
       applyFieldError(fieldError.path as RegisterField, fieldError.message);
+
+      // A 409 on the email is ambiguous: the address may belong to a live
+      // account, or to a half-finished registration whose code was never
+      // entered. The second is the one that dead-ends, because the register
+      // endpoint refuses it just the same. So offer the one request that
+      // can still make progress — ask for a fresh code. The resend endpoint
+      // answers "already verified" if the account is real, which is the
+      // honest answer and needs no new server code to give.
+      const isUnverifiableEmail =
+        fieldError.path === "email" && failure.statusCode === 409;
+
+      setPendingVerification(
+        isUnverifiableEmail
+          ? { email: values.email.trim() }
+          : null,
+      );
+
       return;
     }
 
+    setPendingVerification(null);
     toast.error(failure.message);
+  };
+
+  /**
+   * Shared by a successful register and the "email me a new code" recovery,
+   * so both land on the verify step with identical state.
+   */
+  const enterVerifyStep = (
+    masked: string,
+    cooldownSeconds: number,
+    attempts: number | null,
+  ) => {
+    setMaskedEmail(masked);
+    if (attempts !== null) setMaxAttempts(attempts);
+    setCode("");
+    setCodeError("");
+    setAttemptsLeft(null);
+    setResendIn(cooldownSeconds);
+    setPendingVerification(null);
+    setStep("verify");
   };
 
   // --- Submit ------------------------------------------------------------
@@ -185,6 +247,7 @@ const Register = () => {
     setCodeError("");
     setAttemptsLeft(null);
     setResendIn(RESEND_COOLDOWN_SECONDS);
+    setPendingVerification(null);
     setStep("verify");
 
     if (outcome.data.emailSent) {
@@ -192,6 +255,58 @@ const Register = () => {
     } else {
       toast.error("We couldn't send the email. Use “Resend code” below.");
     }
+  };
+
+  /**
+   * Ask for a code for an address the register endpoint already refused.
+   *
+   * The user reached the code step, decided not to enter it, came back and
+   * filled the same form in again. The account exists, so the form is a dead
+   * end — but the account is also unverified, so a code is still the thing
+   * they need, and the public resend endpoint will issue one.
+   */
+  const handleRecoverWithCode = async () => {
+    if (!pendingVerification) return;
+
+    const target = pendingVerification.email;
+    const result = await resendVerificationCode({ email: target });
+
+    if ("message" in result) {
+      // Rate limited means a code was already sent inside the cooldown
+      // window, so the one already sitting in their inbox is the right one
+      // to use. Send them to it rather than leaving them on a dead form.
+      if (result.code === "RATE_LIMITED") {
+        // The message reads "Please wait 42 seconds before requesting…". Parse
+        // the number out of it so the countdown the user sees is the real one
+        // rather than a guess. `Number(...)` can never be nullish -- an
+        // unmatched string yields NaN, which would survive the `??` and put
+        // NaN into the timer -- so the fallback belongs on the match itself.
+        const parsed = result.message.match(/(\d+)\s+second/)?.[1];
+        const seconds = parsed ? Number(parsed) : RESEND_COOLDOWN_SECONDS;
+
+        enterVerifyStep(maskEmail(target), seconds, null);
+        toast.message("We already sent a code to that address", {
+          description: "Use the most recent one — we didn't send another.",
+        });
+        return;
+      }
+
+      // Anything else — "This email address is already verified." above all —
+      // means this is a real account and login is the way in.
+      setPendingVerification({
+        email: target,
+        problem: result.message,
+      });
+      return;
+    }
+
+    enterVerifyStep(
+      maskEmail(target),
+      result.cooldownSeconds ?? RESEND_COOLDOWN_SECONDS,
+      result.maxAttempts,
+    );
+
+    toast.success(`New code sent to ${maskEmail(target)}`);
   };
 
   // --- Verification ------------------------------------------------------
@@ -364,6 +479,53 @@ const Register = () => {
             error={touched.email ? errors.email : ""}
           />
           <FieldError message={touched.email ? errors.email : ""} />
+
+          {/*
+            Recovery for the dead end: this address already has an account,
+            so submitting the form again can never produce a code. Shown only
+            on a 409 against the email field — a username collision has no
+            equivalent, because the resend endpoint keys off the address.
+          */}
+          {pendingVerification ? (
+            <div className="neo-sm mt-3 flex flex-col gap-2 bg-cream p-3">
+              <p className="text-xs font-bold leading-relaxed text-ink">
+                This email already has an account. If it was never
+                verified, we can send a fresh code — no need to fill
+                the form in again.
+              </p>
+
+              {pendingVerification.problem ? (
+                <p className="text-xs font-extrabold leading-relaxed text-retro-red">
+                  {pendingVerification.problem}{" "}
+                  <Link to="/login" className="neo-sm bg-retro-yellow px-1">
+                    Log in
+                  </Link>
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  size="small"
+                  severity="secondary"
+                  disabled={isAuthPending}
+                  onClick={handleRecoverWithCode}
+                >
+                  {isAuthPending
+                    ? "Sending…"
+                    : "Email me a new code"}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPendingVerification(null)
+                  }
+                  className="text-[11px] font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="w-full">

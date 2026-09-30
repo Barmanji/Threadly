@@ -5,6 +5,8 @@
  * 2. The right code verifies it; a wrong code decrements a visible counter.
  * 3. Once verified, login succeeds.
  * 4. A legacy account (no `isEmailVerified` field at all) still logs in.
+ * 5. Re-registering an existing address stays a dead end (and never mutates
+ *    that account), while the resend endpoint makes a code reachable again.
  *
  * Run: RUN_E2E=1 node scripts/verify-email-e2e.mjs
  *
@@ -186,8 +188,75 @@ const main = async () => {
   check("duplicate email is 409", dupe.status === 409, `got ${dupe.status}`);
   check("duplicate names the email field", dupe.body?.errors?.[0]?.path === "email");
 
+  console.log("\n10. Re-registering an existing address stays a dead end, but a code is reachable");
+  // The register page recovers from a duplicate by offering to resend a code.
+  // It can only do that safely because of the behaviour asserted here, so this
+  // is the contract the frontend fix depends on.
+  const recoveryEmail = `recover-${stamp}@barmanji.com`;
+  const recoveryUsername = `recover${stamp}`;
+  await api("/user/register", registerForm(recoveryEmail, recoveryUsername, TEST_PASSWORD));
+
+  // Re-registering with DIFFERENT credentials is what a user does when they
+  // forgot their password. It must be refused, and it must not silently
+  // rewrite the account — otherwise an unauthenticated caller could take over
+  // any account by posting a known email.
+  const before = await db.collection("users").findOne({ email: recoveryEmail });
+  const reRegister = await api(
+    "/user/register",
+    registerForm(recoveryEmail, `hijack${stamp}`, "Different!Passw0rd"),
+  );
+  check("re-registering an unverified address is 409", reRegister.status === 409, `got ${reRegister.status}`);
+  check(
+    "409 names the email field so the UI can tell it apart from a username clash",
+    reRegister.body?.errors?.[0]?.path === "email",
+    JSON.stringify(reRegister.body?.errors),
+  );
+  check(
+    "409 message is about the address already being registered",
+    /already registered|already.*account|exists/i.test(reRegister.body?.message || ""),
+    reRegister.body?.message,
+  );
+
+  const after = await db.collection("users").findOne({ email: recoveryEmail });
+  check("username is NOT overwritten by the re-register attempt", after?.username === before?.username, `${before?.username} -> ${after?.username}`);
+  check("password hash is NOT overwritten by the re-register attempt", after?.password === before?.password);
+  check("account is still unverified after the re-register attempt", after?.isEmailVerified === false, `got ${after?.isEmailVerified}`);
+
+  // Recovery path: a fresh code for that same address.
+  // Registration already sent one, so the cooldown is genuinely active; backdate
+  // it to reach the 200 branch, and exercise the 429 branch after it.
+  await db.collection("users").updateOne(
+    { email: recoveryEmail },
+    { $set: { "emailVerification.lastSentAt": new Date(0) } },
+  );
+  const resendFresh = await api("/user/resend-verification", jsonBody({ email: recoveryEmail }));
+  check("resend for the unverified address succeeds", resendFresh.status === 200, `got ${resendFresh.status} ${JSON.stringify(resendFresh.body)}`);
+  check("resend reports a cooldown so the UI can show a countdown", typeof resendFresh.body?.data?.cooldownSeconds === "number", JSON.stringify(resendFresh.body?.data));
+  check("resend reports maxAttempts", typeof resendFresh.body?.data?.maxAttempts === "number");
+  check("resend echoes no plaintext address", String(resendFresh.body?.data?.email ?? "").includes("*") === false, JSON.stringify(resendFresh.body?.data));
+
+  // Inside the cooldown: the UI must still be able to move the user forward,
+  // because a code is already sitting in their inbox.
+  const resendCooling = await api("/user/resend-verification", jsonBody({ email: recoveryEmail }));
+  check("resend inside the cooldown is 429", resendCooling.status === 429, `got ${resendCooling.status}`);
+  check("429 uses the RATE_LIMITED code the UI branches on", resendCooling.body?.code === "RATE_LIMITED", JSON.stringify(resendCooling.body));
+  check("429 states a number of seconds so the UI can show the real wait", /wait \d+ seconds?/i.test(resendCooling.body?.message || ""), resendCooling.body?.message);
+
+  // A verified account must NOT be dumped onto the code step: there is nothing
+  // to verify, so login is the way in.
+  await db.collection("users").updateOne({ email: recoveryEmail }, { $set: { isEmailVerified: true } });
+  const resendVerified = await api("/user/resend-verification", jsonBody({ email: recoveryEmail }));
+  check("resend for a verified address is 409", resendVerified.status === 409, `got ${resendVerified.status} ${JSON.stringify(resendVerified.body)}`);
+  check("409 says the address is already verified", /already verified/i.test(resendVerified.body?.message || ""), resendVerified.body?.message);
+
+  // An address with no account at all: the UI must not promise a code here.
+  const resendGhost = await api("/user/resend-verification", jsonBody({ email: `ghost-${stamp}@barmanji.com` }));
+  check("resend for an unknown address is 404", resendGhost.status === 404, `got ${resendGhost.status}`);
+
   // Cleanup
-  await db.collection("users").deleteMany({ email: { $in: [TEST_EMAIL, legacyEmail] } });
+  await db.collection("users").deleteMany({
+    email: { $in: [TEST_EMAIL, legacyEmail, recoveryEmail] },
+  });
   await mongoose.disconnect();
 
   console.log(`\n${"=".repeat(46)}\n  ${pass} passed, ${fail} failed\n${"=".repeat(46)}\n`);
