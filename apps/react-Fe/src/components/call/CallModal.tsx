@@ -406,9 +406,23 @@ const CallModal: React.FC<CallModalProps> = ({
           className="relative flex w-full flex-col items-center justify-center gap-4 p-4"
           style={{ height: whiteboardHeight }}
         >
-          <div className="flex min-h-0 w-full flex-1 gap-4">
-            {remoteTile("min-h-0 h-full w-1/2 flex-shrink-0")}
-            {localTile("min-h-0 h-full w-1/2 flex-shrink-0")}
+          {/*
+            Mobile stacks the two tiles instead of splitting the width.
+            Side by side on a phone each tile is ~50% of the screen width
+            but the FULL height of the panel, so a `w-1/2` box is a narrow
+            vertical sliver and `object-cover` crops the frame to a strip
+            through the middle of the person. Stacked, each tile gets the
+            full width, which turns that sliver back into a roughly 1.4:1
+            box and crops far less.
+
+            `sm:flex-row` / `sm:w-1/2` / `sm:flex-none` put the desktop
+            layout back exactly as it was — `sm:flex-none` matters because
+            the mobile `flex-1` would otherwise leave `flex-basis: 0` in
+            place and change how the two 50% tiles are measured.
+          */}
+          <div className="flex min-h-0 w-full flex-1 flex-col gap-4 sm:flex-row">
+            {remoteTile("min-h-0 w-full flex-1 sm:h-full sm:w-1/2 sm:flex-none")}
+            {localTile("min-h-0 w-full flex-1 sm:h-full sm:w-1/2 sm:flex-none")}
           </div>
 
           {/* Controls */}
