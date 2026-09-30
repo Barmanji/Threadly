@@ -768,11 +768,6 @@ const ChatPage = () => {
     // updating on each `useEffect` call but on each socket call.
   }, [socket, chats]);
 
-  // Metadata for the current chat (used to display the remote user in the call UI)
-  const currentChatMetadata = currentChat.current
-    ? getChatObjectMetadata(currentChat.current, user!)
-    : null;
-
   // Find the remote user's ID from the current chat participants.
   // Also consider incomingCall.from for when the user receives a call while
   // viewing a different chat — the caller's userId is the true remote peer.
@@ -807,6 +802,27 @@ const ChatPage = () => {
         c.participants.some((p) => p._id === remoteUserId),
     );
     return sharedChat?._id ?? currentChat.current?._id;
+  })();
+
+  /**
+   * Who the person on the other end of the call actually is.
+   *
+   * Deliberately NOT `getChatObjectMetadata(currentChat.current, user)`, which
+   * is what this used to pass. That describes the conversation the user is
+   * currently *reading*, and during a call the two are independent — you can
+   * carry on chatting with someone else while still talking to the person you
+   * called. Reading the visible chat meant that opening any other conversation
+   * silently relabelled the call panel with that person's name and face while
+   * the audio and video kept coming from the original peer: the call stayed
+   * connected and correctly targeted, but the UI named someone who was not on
+   * it.
+   *
+   * Resolved through `callChatId`, which `callPeerIdRef` pins to the peer for
+   * the whole duration of the call, so this is stable across navigation.
+   */
+  const callChatMetadata = (() => {
+    const callChat = chats.find((c) => c._id === callChatId);
+    return user && callChat ? getChatObjectMetadata(callChat, user) : null;
   })();
 
   // Active chat's typing users
@@ -1249,8 +1265,8 @@ const ChatPage = () => {
               <div className="contents sm:block sm:relative sm:h-0 sm:w-full sm:flex-shrink-0">
                 <CallModal
                   chatId={callChatId}
-                  remoteAvatar={currentChatMetadata?.avatar}
-                  remoteName={currentChatMetadata?.title}
+                  remoteAvatar={callChatMetadata?.avatar}
+                  remoteName={callChatMetadata?.title}
                   localAvatar={user?.avatar}
                 />
               </div>
