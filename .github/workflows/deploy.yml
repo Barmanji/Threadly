@@ -1,17 +1,10 @@
 name: Deploy to EC2
 
-# A merge into main is also a push to main, so this one trigger covers both
-# "merge a PR" and "push straight to main". It is deliberately `push` and not
-# `pull_request`: the workflow that runs is then guaranteed to be the version on
-# main, so a PR cannot change what gets deployed to the server.
 on:
   push:
     branches: [main]
-  # Deploy any branch without merging: pick it in the UI.
   workflow_dispatch:
 
-# One deploy at a time. Two builds racing each other on one box would fight
-# over the working tree and the dist/ directory.
 concurrency:
   group: ec2-deploy
   cancel-in-progress: false
@@ -19,7 +12,6 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # A wedged SSH connection should not hold a runner open indefinitely.
     timeout-minutes: 25
 
     steps:
@@ -30,28 +22,43 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
+      # If EC2_KNOWN_HOSTS is set, only that exact host key is trusted.
+      # If not, fall back to trust-on-first-use (fine, but no MITM protection).
+      - name: Pin host key
+        env:
+          KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          if [ -n "$KNOWN_HOSTS" ]; then
+            echo "$KNOWN_HOSTS" >> ~/.ssh/known_hosts
+            echo "HOSTKEY_MODE=yes" >> "$GITHUB_ENV"
+          else
+            echo "HOSTKEY_MODE=accept-new" >> "$GITHUB_ENV"
+          fi
+
       - name: Build and deploy
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
           EC2_REPO: ${{ secrets.EC2_REPO_PATH }}
-          # github.ref_name is the pushed branch for `push`, and the chosen
-          # branch for workflow_dispatch.
           DEPLOY_BRANCH: ${{ github.ref_name }}
         run: |
-          # `bash -s -- <args>` feeds the script on stdin and passes the values
-          # as $1/$2. The heredoc delimiter is quoted so nothing is expanded on
-          # the runner, and nothing is baked into the script text.
-          ssh -o StrictHostKeyChecking=accept-new \
+          ssh -o StrictHostKeyChecking="$HOSTKEY_MODE" \
               "$EC2_USER@$EC2_HOST" bash -s -- "$EC2_REPO" "$DEPLOY_BRANCH" <<'REMOTE'
+          # Non-interactive SSH skips ~/.bashrc, so load fnm by hand.
+          export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
+          if command -v fnm >/dev/null 2>&1; then
+            eval "$(fnm env --shell bash)"
+          fi
+
           set -euo pipefail
 
           REPO="$1"
           BRANCH="$2"
+          BACKUP="$HOME/threadly-dist-backup"
 
           cd "$REPO"
 
-          # Recorded before anything changes, so a failed deploy can go back.
           PREV=$(git rev-parse HEAD)
           echo "currently deployed: $PREV ($(git log -1 --format=%s))"
 
@@ -62,108 +69,75 @@ jobs:
             exit 1
           fi
 
+          # Until the restart, any failure puts the source back on the commit
+          # that is actually running, so the next deploy records a good PREV.
+          PHASE=build
+          on_exit() {
+            rc=$?
+            if [ "$rc" -ne 0 ] && [ "$PHASE" = build ]; then
+              echo "FAILED before restart -- restoring source to $PREV"
+              git -C "$REPO" reset --hard "$PREV" || true
+            fi
+          }
+          trap on_exit EXIT
+
           git fetch origin "$BRANCH"
           git reset --hard "origin/$BRANCH"
           echo "now building $(git rev-parse --short HEAD) ($(git log -1 --format=%s))"
 
-          # .env is gitignored, so the reset above leaves it alone.
-          if [ ! -f apps/http-server-Be/.env ]; then
-            echo "ERROR: apps/http-server-Be/.env is missing -- the backend would"
-            echo "start on port 8080 with no database URI."
-            exit 1
-          fi
+          # Backend reads its .env at runtime; Vite inlines the frontend .env
+          # into the bundle at build time. Both must exist.
+          for f in apps/http-server-Be/.env apps/react-Fe/.env; do
+            if [ ! -f "$f" ]; then
+              echo "ERROR: $f is missing"
+              exit 1
+            fi
+          done
 
-          # Only reach for corepack if pnpm is not already installed; enabling it
-          # needs write access to the node install dir and can fail without sudo.
           command -v pnpm >/dev/null 2>&1 || corepack enable
           pnpm install --frozen-lockfile
 
-          # Build BOTH before restarting anything. set -e aborts on the first
-          # failure, and because nothing has been restarted yet, a broken build
-          # cannot take the running backend down.
-          #
-          # The backend env vars are inlined into the bundle by Vite, so
-          # apps/react-Fe/.env has to be correct before the frontend build.
-          pnpm --filter http-server-be build
-
-          # The frontend needs a backup, and this is the subtle one.
-          #
-          # nginx's root points straight at this dist/ directory, so Vite
-          # emptying it before it builds -- which emptyOutDir does by default --
-          # means a build that fails halfway through leaves nginx serving a
-          # half-written directory. That is a total outage, and `set -e` aborts
-          # before the healthcheck runs, so nothing would ever notice or repair
-          # it. The previous build is only ~2.5 MB, so copy it aside and hold on
-          # to it until the new one has been fully verified.
-          rm -rf dist-backup
-          # On a fresh clone there is no previous build to fall back to, and a
-          # missing dist/ must not abort the deploy before anything has run.
-          if [ -d apps/react-Fe/dist ]; then
-            cp -a apps/react-Fe/dist dist-backup
-          fi
-
-          restore_dist() {
-            if [ -d dist-backup ]; then
+          # Vite empties dist/ before building and nginx serves it directly, so
+          # keep the previous build aside and put it back if the new one fails.
+          build_frontend() {
+            rm -rf "$BACKUP"
+            if [ -d apps/react-Fe/dist ]; then
+              cp -a apps/react-Fe/dist "$BACKUP"
+            fi
+            if pnpm --filter react-fe build && test -f apps/react-Fe/dist/index.html; then
+              rm -rf "$BACKUP"
+              return 0
+            fi
+            echo "frontend build failed"
+            if [ -d "$BACKUP" ]; then
               echo "restoring the previous frontend build"
               rm -rf apps/react-Fe/dist
-              mv dist-backup apps/react-Fe/dist
+              mv "$BACKUP" apps/react-Fe/dist
             fi
+            return 1
           }
 
-          # Every reason to restore funnels through one place, and the backup
-          # only goes away once the new build has passed every check.
-          pnpm --filter react-fe build || { restore_dist; exit 1; }
-          test -f apps/react-Fe/dist/index.html || { restore_dist; exit 1; }
-          rm -rf dist-backup
+          # Build both before restarting anything.
+          pnpm --filter http-server-be build
+          build_frontend || exit 1
 
-          # Restart from inside the app directory. pm2 relaunches from the script
-          # path and working directory it recorded when the process was started,
-          # so this is belt and braces -- but the backend resolves .env relative
-          # to its working directory (dotenv.config({ path: "./.env" })), and
-          # getting that wrong starts it on port 8080 with no database URI rather
-          # than failing outright.
-          #
-          # Note the capital B in the directory name, which differs from the
-          # lowercase package name that --filter matches. Linux is
-          # case-sensitive, so the lowercase path is a dead end.
+          # Builds passed: from here on, rollback is handled explicitly below.
+          PHASE=live
+
+          # The backend resolves .env relative to its working directory.
           cd apps/http-server-Be
-
-          # This is the same restart that works by hand, minus the id. Restarting
-          # by name is deliberate: pm2 ids shift, and if a second process is ever
-          # added, id 0 could be pointing at the wrong one. A wrong name here
-          # fails loudly, which is the outcome we want.
-          #
-          # No --update-env, to stay identical to the manual procedure. Reach for
-          # it only if an edit to .env ever appears not to take effect: pm2
-          # replays its saved environment, and dotenv will not overwrite
-          # variables that are already set.
           pm2 restart threadly-backend
-          sleep 3
 
-          if ! curl -fsS http://localhost:3004/api/v1/healthcheck; then
+          if ! curl -fsS --retry 10 --retry-delay 2 --retry-connrefused \
+               http://localhost:3004/api/v1/healthcheck; then
             echo ""
             echo "HEALTH CHECK FAILED -- rolling back to $PREV"
+            PHASE=rollback
             cd "$REPO"
             git reset --hard "$PREV"
             pnpm install --frozen-lockfile
             pnpm --filter http-server-be build
-            # Same trap as above: the current dist is the build that was just
-            # deployed, so it is the only thing worth keeping if this build
-            # fails too. Leaving it alone beats serving an empty directory.
-            rm -rf dist-backup
-            if [ -d apps/react-Fe/dist ]; then
-              cp -a apps/react-Fe/dist dist-backup
-            fi
-            if pnpm --filter react-fe build; then
-              rm -rf dist-backup
-            else
-              if [ -d dist-backup ]; then
-                echo "WARNING: the rollback build failed too. Keeping the current"
-                echo "frontend build rather than serving an empty directory."
-                rm -rf apps/react-Fe/dist
-                mv dist-backup apps/react-Fe/dist
-              fi
-            fi
+            build_frontend || echo "WARNING: rollback frontend build failed; keeping the current build."
             cd apps/http-server-Be
             pm2 restart threadly-backend
             pm2 save
@@ -171,12 +145,10 @@ jobs:
             exit 1
           fi
 
-          # Persist the process list so it comes back after a reboot.
           pm2 save
 
-          NEW=$(git rev-parse --short HEAD)
           echo ""
-          echo "DEPLOYED $NEW -- $(git log -1 --format=%s)"
+          echo "DEPLOYED $(git rev-parse --short HEAD) -- $(git log -1 --format=%s)"
           REMOTE
 
       - name: Summary
