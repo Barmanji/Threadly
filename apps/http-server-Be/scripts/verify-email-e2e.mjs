@@ -5,8 +5,12 @@
  * 2. The right code verifies it; a wrong code decrements a visible counter.
  * 3. Once verified, login succeeds.
  * 4. A legacy account (no `isEmailVerified` field at all) still logs in.
- * 5. Re-registering an existing address stays a dead end (and never mutates
- *    that account), while the resend endpoint makes a code reachable again.
+ * 5. Re-registering an existing address is refused and never mutates that
+ *    account, while the resend endpoint makes a code reachable again.
+ * 6. `/recover-account` + `/recover-account/complete` recover an account that
+ *    already exists: an emailed code is the only credential, and it gates a
+ *    real password / username / picture change on a *verified* account (the
+ *    forgot-password case) as well as finishing an abandoned signup.
  *
  * Run: RUN_E2E=1 node scripts/verify-email-e2e.mjs
  *
@@ -253,9 +257,188 @@ const main = async () => {
   const resendGhost = await api("/user/resend-verification", jsonBody({ email: `ghost-${stamp}@barmanji.com` }));
   check("resend for an unknown address is 404", resendGhost.status === 404, `got ${resendGhost.status}`);
 
+  console.log("\n11. RECOVERY: a code unlocks a real change on a working account");
+  // The case `/resend-verification` cannot serve: it answers a confirmed
+  // address with 409 (asserted in step 10), so the owner of a perfectly healthy
+  // account who cannot remember the password had no way forward at all.
+  // `recover-account` exists for exactly that, and this is the contract the
+  // register page's recovery panel depends on.
+  const forgotEmail = `forgot-${stamp}@barmanji.com`;
+  const forgotUsername = `forgot${stamp}`;
+  const forgotNewPassword = "N3w!Password";
+  const forgotNewUsername = `recovered${stamp}`;
+
+  await api("/user/register", registerForm(forgotEmail, forgotUsername, TEST_PASSWORD));
+  await db.collection("users").updateOne({ email: forgotEmail }, { $set: { isEmailVerified: true } });
+  // Log in once so the account holds a live session. Recovery has to revoke
+  // it: that session was minted from the password the user just replaced, so
+  // keeping it would leave whoever prompted the reset still signed in.
+  const forgotLogin = await api("/user/login", jsonBody({ username: forgotUsername, password: TEST_PASSWORD }));
+  check("forgot-password fixture can log in", forgotLogin.status === 200, `got ${forgotLogin.status} ${JSON.stringify(forgotLogin.body)}`);
+  const withSession = await db.collection("users").findOne({ email: forgotEmail });
+  check("fixture has a refreshToken for the recovery to revoke", Boolean(withSession?.refreshToken), JSON.stringify(withSession?.refreshToken));
+
+  // Registration already sent a code, so backdate to reach the 200 branch.
+  await db.collection("users").updateOne({ email: forgotEmail }, { $set: { "emailVerification.lastSentAt": new Date(0) } });
+  const recVerified = await api("/user/recover-account", jsonBody({ email: forgotEmail }));
+  check("recover-account serves a VERIFIED address (resend-verification 409s here)", recVerified.status === 200, `got ${recVerified.status} ${JSON.stringify(recVerified.body)}`);
+  check("it reports accountVerified: true", recVerified.body?.data?.accountVerified === true, JSON.stringify(recVerified.body?.data));
+  check("it reports a cooldown so the UI can count down", typeof recVerified.body?.data?.cooldownSeconds === "number", JSON.stringify(recVerified.body?.data));
+  check("it reports maxAttempts", recVerified.body?.data?.maxAttempts === 5, JSON.stringify(recVerified.body?.data));
+
+  const recCooling = await api("/user/recover-account", jsonBody({ email: forgotEmail }));
+  check("a second request inside the cooldown is 429", recCooling.status === 429, `got ${recCooling.status}`);
+  check("429 uses the RATE_LIMITED code the UI branches on", recCooling.body?.code === "RATE_LIMITED", JSON.stringify(recCooling.body));
+  check("429 states a number of seconds so the UI shows the real wait", /wait \d+ seconds?/i.test(recCooling.body?.message || ""), recCooling.body?.message);
+
+  console.log("\n12. The code is the gate: a wrong code changes NOTHING");
+  const completeForm = (email, code, { password, username, avatar } = {}) => {
+    const fd = new FormData();
+    fd.set("email", email);
+    fd.set("code", code);
+    if (password) fd.set("newPassword", password);
+    if (username) fd.set("newUsername", username);
+    if (avatar) fd.set("avatar", new Blob([avatar], { type: "image/png" }), "b.png");
+    return fd;
+  };
+
+  // The attack this must stop: a known email plus a new password. Without the
+  // code, the password has to stay exactly as it was.
+  const beforeWrong = await db.collection("users").findOne({ email: forgotEmail });
+  const wrong = await api("/user/recover-account/complete", completeForm(forgotEmail, "000000", { password: forgotNewPassword, username: forgotNewUsername }));
+  check("a wrong code is rejected with 400", wrong.status === 400, `got ${wrong.status} ${JSON.stringify(wrong.body)}`);
+  check("the rejection is mapped to the code field", wrong.body?.errors?.[0]?.path === "code", JSON.stringify(wrong.body?.errors));
+  check("it reports the attempts remaining", /4 attempt/i.test(wrong.body?.message || ""), wrong.body?.message);
+  const afterWrong = await db.collection("users").findOne({ email: forgotEmail });
+  check("password hash NOT changed by a wrong code", afterWrong?.password === beforeWrong?.password);
+  check("username NOT changed by a wrong code", afterWrong?.username === beforeWrong?.username);
+  check("picture NOT changed by a wrong code", afterWrong?.avatar === beforeWrong?.avatar);
+  check("the live session is NOT revoked by a wrong code", afterWrong?.refreshToken === beforeWrong?.refreshToken);
+
+  console.log("\n13. A rejected DETAIL leaves the code usable, so the user can fix one field");
+  // The point of checking the code without consuming it: a taken username or a
+  // failed upload should cost the user a form edit, not another email.
+  const RECOVERY_CODE = "630271";
+  await db.collection("users").updateOne(
+    { email: forgotEmail },
+    { $set: { emailVerification: { codeHash: await bcrypt.hash(RECOVERY_CODE, 10), expiresAt: new Date(Date.now() + 600000), attempts: 5, lastSentAt: new Date() } } },
+  );
+
+  const weak = await api("/user/recover-account/complete", completeForm(forgotEmail, RECOVERY_CODE, { password: "weak" }));
+  check("a password too weak to accept is refused with 400", weak.status === 400, `got ${weak.status} ${JSON.stringify(weak.body)}`);
+  check("and mapped to the password field", weak.body?.errors?.[0]?.path === "password", JSON.stringify(weak.body?.errors));
+
+  const taken = await api("/user/recover-account/complete", completeForm(forgotEmail, RECOVERY_CODE, { password: forgotNewPassword, username: TEST_USERNAME }));
+  check("a username already in use is refused with 409", taken.status === 409, `got ${taken.status} ${JSON.stringify(taken.body)}`);
+  check("and mapped to the username field", taken.body?.errors?.[0]?.path === "username", JSON.stringify(taken.body?.errors));
+
+  const badName = await api("/user/recover-account/complete", completeForm(forgotEmail, RECOVERY_CODE, { username: "not a valid name!" }));
+  check("a malformed username is refused with 400", badName.status === 400, `got ${badName.status}`);
+  check("and mapped to the username field", badName.body?.errors?.[0]?.path === "username", JSON.stringify(badName.body?.errors));
+
+  const midFlight = await db.collection("users").findOne({ email: forgotEmail });
+  check("the code was NOT spent by any of those three rejections", typeof midFlight?.emailVerification?.codeHash === "string", JSON.stringify(midFlight?.emailVerification));
+  check("still no detail applied after all three", midFlight?.password === beforeWrong?.password && midFlight?.username === beforeWrong?.username, `${midFlight?.username}`);
+
+  console.log("\n14. The correct code applies password, username AND picture at once");
+  const done = await api("/user/recover-account/complete", completeForm(forgotEmail, RECOVERY_CODE, { password: forgotNewPassword, username: forgotNewUsername, avatar: PNG }));
+  check("the correct code applies the changes", done.status === 200, `got ${done.status} ${JSON.stringify(done.body)}`);
+  check("it lists all three as changed", done.body?.data?.changed?.length === 3, JSON.stringify(done.body?.data));
+  check("password is in the changed list", done.body?.data?.changed?.includes("password"));
+  check("username is in the changed list", done.body?.data?.changed?.includes("username"));
+  check("the picture is in the changed list", done.body?.data?.changed?.includes("avatar"));
+  check("the address comes back masked", String(done.body?.data?.email).includes("*"), done.body?.data?.email);
+  // The decisive one: this whole endpoint runs without a session, so handing
+  // back a token would be a second, quieter way to take the account.
+  check("NO accessToken is issued to an unauthenticated caller", done.body?.data?.accessToken === undefined, JSON.stringify(Object.keys(done.body?.data || {})));
+  check("NO refreshToken either", done.body?.data?.refreshToken === undefined, JSON.stringify(Object.keys(done.body?.data || {})));
+
+  const recovered = await db.collection("users").findOne({ email: forgotEmail });
+  check("the stored password hash really changed", recovered?.password !== beforeWrong?.password);
+  check("the new password actually matches the stored hash", await bcrypt.compare(forgotNewPassword, recovered?.password || ""));
+  check("the username was applied and normalised to lowercase", recovered?.username === forgotNewUsername, `got ${recovered?.username}`);
+  check("the picture was replaced", typeof recovered?.avatar === "string" && recovered.avatar !== beforeWrong?.avatar, `got ${recovered?.avatar}`);
+  check("the account is still verified", recovered?.isEmailVerified === true);
+  check("the code was destroyed on success", recovered?.emailVerification === undefined, JSON.stringify(recovered?.emailVerification));
+  check("every existing session was revoked", !recovered?.refreshToken, `got ${recovered?.refreshToken}`);
+
+  // Two distinct failures, and the difference matters: the old *identifier* is
+  // simply gone (404), while the old *password* is still dead on the renamed
+  // account (401). Only the 401 proves the hash actually changed.
+  const oldIdentifier = await api("/user/login", jsonBody({ username: forgotUsername, password: TEST_PASSWORD }));
+  check("the old USERNAME no longer resolves", oldIdentifier.status === 404, `got ${oldIdentifier.status} ${JSON.stringify(oldIdentifier.body)}`);
+  const oldPw = await api("/user/login", jsonBody({ username: forgotNewUsername, password: TEST_PASSWORD }));
+  check("the old PASSWORD is refused on the new username", oldPw.status === 401, `got ${oldPw.status} ${JSON.stringify(oldPw.body)}`);
+  const newPw = await api("/user/login", jsonBody({ username: forgotNewUsername, password: forgotNewPassword }));
+  check("the NEW credentials log in", newPw.status === 200, `got ${newPw.status} ${JSON.stringify(newPw.body)}`);
+  const byEmailLogin = await api("/user/login", jsonBody({ username: forgotEmail, password: forgotNewPassword }));
+  check("logging in by ADDRESS with the new password works — what the page does", byEmailLogin.status === 200, `got ${byEmailLogin.status}`);
+
+  const spentCode = await api("/user/recover-account/complete", completeForm(forgotEmail, RECOVERY_CODE, { password: "Third!Passw0rd" }));
+  check("a spent code cannot be replayed to change the account again", spentCode.status >= 400, `got ${spentCode.status}`);
+  const afterReplay = await db.collection("users").findOne({ email: forgotEmail });
+  check("and the replay changed nothing", afterReplay?.password === recovered?.password);
+
+  console.log("\n15. The same code finishes an ABANDONED SIGNUP, keeping the original details");
+  // The other half of the problem: the address was registered but the code was
+  // never entered. Here there is nothing to change, and refusing it with
+  // "nothing to change" would have re-created the dead end this work removed.
+  const abandonEmail = `abandon-${stamp}@barmanji.com`;
+  const abandonUsername = `abandon${stamp}`;
+  await api("/user/register", registerForm(abandonEmail, abandonUsername, TEST_PASSWORD));
+  await db.collection("users").updateOne({ email: abandonEmail }, { $set: { "emailVerification.lastSentAt": new Date(0) } });
+  const recUnverified = await api("/user/recover-account", jsonBody({ email: abandonEmail }));
+  check("recover-account serves an UNVERIFIED address too", recUnverified.status === 200, `got ${recUnverified.status}`);
+  check("it reports accountVerified: false", recUnverified.body?.data?.accountVerified === false, JSON.stringify(recUnverified.body?.data));
+
+  const ABANDON_CODE = "517204";
+  const abandonBefore = await db.collection("users").findOne({ email: abandonEmail });
+  await db.collection("users").updateOne(
+    { email: abandonEmail },
+    { $set: { emailVerification: { codeHash: await bcrypt.hash(ABANDON_CODE, 10), expiresAt: new Date(Date.now() + 600000), attempts: 5, lastSentAt: new Date() } } },
+  );
+  // Deliberately no newPassword, no newUsername, no avatar — just the code.
+  const finish = await api("/user/recover-account/complete", completeForm(abandonEmail, ABANDON_CODE, {}));
+  check("a code on its own is accepted, not rejected as 'nothing to change'", finish.status === 200, `got ${finish.status} ${JSON.stringify(finish.body)}`);
+  check("it reports an empty changed list", Array.isArray(finish.body?.data?.changed) && finish.body.data.changed.length === 0, JSON.stringify(finish.body?.data));
+  const abandoned = await db.collection("users").findOne({ email: abandonEmail });
+  check("the account is now verified", abandoned?.isEmailVerified === true);
+  check("the ORIGINAL username is untouched", abandoned?.username === abandonUsername, `got ${abandoned?.username}`);
+  check("the ORIGINAL password hash is untouched", abandoned?.password === abandonBefore?.password);
+  const abandonLogin = await api("/user/login", jsonBody({ username: abandonUsername, password: TEST_PASSWORD }));
+  check("the user can now log in with what they originally signed up with", abandonLogin.status === 200, `got ${abandonLogin.status} ${JSON.stringify(abandonLogin.body)}`);
+
+  console.log("\n16. Guard rails on the recovery endpoints");
+  const noEmail = await api("/user/recover-account", jsonBody({}));
+  check("requesting a code with no address is 400", noEmail.status === 400, `got ${noEmail.status}`);
+  const ghost = await api("/user/recover-account", jsonBody({ email: `ghost2-${stamp}@barmanji.com` }));
+  check("requesting a code for an unknown address is 404", ghost.status === 404, `got ${ghost.status}`);
+
+  const noCode = await api("/user/recover-account/complete", completeForm(forgotEmail, ""));
+  check("completing with no code is 400", noCode.status === 400, `got ${noCode.status}`);
+  const shortCode = await api("/user/recover-account/complete", completeForm(forgotEmail, "12345", { password: forgotNewPassword }));
+  check("a 5-digit code is refused on shape, 400", shortCode.status === 400, `got ${shortCode.status}`);
+  check("the shape refusal is mapped to the code field", shortCode.body?.errors?.[0]?.path === "code", JSON.stringify(shortCode.body?.errors));
+
+  // `recover-account` 404s an unknown address while `complete` 400s it. That
+  // asymmetry does confirm whether an account exists, but `/register` already
+  // answers 409 for a duplicate, so the endpoint leaks nothing new.
+  const ghostComplete = await api("/user/recover-account/complete", completeForm(`ghost2-${stamp}@barmanji.com`, "123456", { password: "Anyth!ng123" }));
+  check("completing for an unknown address is a 400, not a 500", ghostComplete.status === 400, `got ${ghostComplete.status}`);
+
+  // The address is the identity the code was sent to, so it is not changeable.
+  // Even if a caller appends the field it must be ignored, never applied.
+  const swapForm = completeForm(forgotEmail, "123456", {});
+  swapForm.set("newEmail", `attacker-${stamp}@barmanji.com`);
+  const emailSwap = await api("/user/recover-account/complete", swapForm);
+  check("posting a newEmail alongside the code is refused", emailSwap.status >= 400, `got ${emailSwap.status}`);
+  const afterSwap = await db.collection("users").findOne({ email: forgotEmail });
+  check("the account did not move to the other address", afterSwap?.email === forgotEmail, `got ${afterSwap?.email}`);
+  check("the other address has no account", !(await db.collection("users").findOne({ email: `attacker-${stamp}@barmanji.com` })));
+
   // Cleanup
   await db.collection("users").deleteMany({
-    email: { $in: [TEST_EMAIL, legacyEmail, recoveryEmail] },
+    email: { $in: [TEST_EMAIL, legacyEmail, recoveryEmail, forgotEmail, abandonEmail] },
   });
   await mongoose.disconnect();
 

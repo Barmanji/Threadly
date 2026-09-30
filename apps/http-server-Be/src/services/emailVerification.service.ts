@@ -35,11 +35,18 @@ export interface IssuedCodeResult {
  *
  * Rate limited to one send per `EMAIL_VERIFICATION_RESEND_COOLDOWN_MS` so the
  * endpoint can't be used to spam an inbox or to burn through Resend quota.
+ *
+ * `allowVerified` exists for the account-recovery path. Ordinary verification
+ * has nothing to do once the address is confirmed, and refusing to send keeps
+ * that endpoint from being a password-reset oracle. Recovery is different: the
+ * code is being used to prove control of the inbox before changing credentials,
+ * which a confirmed address has just as much need for as an unconfirmed one.
  */
 export const issueVerificationCode = async (
   userId: string,
   email: string,
   username: string,
+  { allowVerified = false }: { allowVerified?: boolean } = {},
 ): Promise<IssuedCodeResult> => {
   const user = await User.findById(userId);
   if (!user) {
@@ -47,7 +54,7 @@ export const issueVerificationCode = async (
   }
 
   // Already verified — nothing to do, and don't burn a send.
-  if (user.isEmailVerified) {
+  if (user.isEmailVerified && !allowVerified) {
     throw new ApiError(409, "This email address is already verified.");
   }
 
@@ -95,35 +102,28 @@ export interface VerifyCodeResult {
   attemptsUsed: number;
 }
 
+/** The subset of the user document the code check needs. */
+type UserForCodeCheck = InstanceType<typeof User>;
+
 /**
  * Check a submitted code against the stored hash.
+ *
+ * Deliberately does NOT mutate on success — the caller decides what a valid
+ * code entitles the caller to, and how to commit it. The account-recovery path
+ * needs that: it has to check the code and then still be able to fail on a
+ * taken username or a Cloudinary error, and it must not have burned the code
+ * if it does.
+ *
+ * Failures DO mutate, because the attempt counter is the thing limiting
+ * brute-force guessing and it has to advance no matter who is calling.
  *
  * Throws a descriptive `ApiError` on every failure path. The client uses
  * `attemptsRemaining` to tell the user exactly how many tries they have left.
  */
-export const verifyEmailCode = async (
-  email: string,
+const checkPendingCode = async (
+  user: UserForCodeCheck,
   code: string,
 ): Promise<VerifyCodeResult> => {
-  const user = await User.findOne({ email: email.toLowerCase().trim() });
-
-  // Deliberately identical response whether the account exists or not, so
-  // this endpoint can't be used to enumerate registered email addresses.
-  if (!user) {
-    throw new ApiError(
-      400,
-      "That code isn't right. Check it and try again.",
-      [{ path: "code", message: "That code isn't right. Check it and try again." }],
-      "VERIFICATION_CODE_INVALID",
-    );
-  }
-
-  if (user.isEmailVerified) {
-    // Idempotent: a double-submit (e.g. a retry after a slow response) should
-    // succeed rather than confuse the user.
-    return { attemptsRemaining: EMAIL_VERIFICATION_MAX_ATTEMPTS, attemptsUsed: 0 };
-  }
-
   const verification = user.emailVerification;
   if (!verification?.codeHash) {
     throw new ApiError(
@@ -186,8 +186,44 @@ export const verifyEmailCode = async (
     );
   }
 
+  return {
+    attemptsRemaining: EMAIL_VERIFICATION_MAX_ATTEMPTS,
+    attemptsUsed: verification.attempts ?? 0,
+  };
+};
+
+/**
+ * Check a submitted code against the stored hash.
+ *
+ * Throws a descriptive `ApiError` on every failure path. The client uses
+ * `attemptsRemaining` to tell the user exactly how many tries they have left.
+ */
+export const verifyEmailCode = async (
+  email: string,
+  code: string,
+): Promise<VerifyCodeResult> => {
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+  // Deliberately identical response whether the account exists or not, so
+  // this endpoint can't be used to enumerate registered email addresses.
+  if (!user) {
+    throw new ApiError(
+      400,
+      "That code isn't right. Check it and try again.",
+      [{ path: "code", message: "That code isn't right. Check it and try again." }],
+      "VERIFICATION_CODE_INVALID",
+    );
+  }
+
+  if (user.isEmailVerified) {
+    // Idempotent: a double-submit (e.g. a retry after a slow response) should
+    // succeed rather than confuse the user.
+    return { attemptsRemaining: EMAIL_VERIFICATION_MAX_ATTEMPTS, attemptsUsed: 0 };
+  }
+
+  const result = await checkPendingCode(user, code);
+
   // Correct code.
-  const attemptsUsed = verification.attempts ?? 0;
   user.isEmailVerified = true;
   // Clear the sub-document entirely — the code has served its purpose and
   // there's no reason to keep a hash of it around.
@@ -196,5 +232,40 @@ export const verifyEmailCode = async (
 
   logger.info(`[email-verification] verified ${maskEmail(user.email)}`);
 
-  return { attemptsRemaining: EMAIL_VERIFICATION_MAX_ATTEMPTS, attemptsUsed };
+  return result;
 };
+
+/**
+ * Check a recovery code WITHOUT consuming it.
+ *
+ * Same security gate as `verifyEmailCode` — a code from the inbox, the same
+ * expiry, the same five attempts — but it leaves the pending code in place so
+ * the caller can still reject a bad username or a failed upload without the
+ * user having to ask for another email. It also does not treat an
+ * already-verified account as an automatic pass, which is the whole point:
+ * that is the forgot-password case.
+ *
+ * The returned `user` is a live document the caller is expected to mutate and
+ * save exactly once.
+ */
+export const checkRecoveryCode = async (
+  email: string,
+  code: string,
+): Promise<{ user: UserForCodeCheck; attemptsRemaining: number; attemptsUsed: number }> => {
+  const user = await User.findOne({ email: email.toLowerCase().trim() });
+
+  // Identical to a wrong code, so a caller cannot use this to discover which
+  // addresses have accounts.
+  if (!user) {
+    throw new ApiError(
+      400,
+      "That code isn't right. Check it and try again.",
+      [{ path: "code", message: "That code isn't right. Check it and try again." }],
+      "VERIFICATION_CODE_INVALID",
+    );
+  }
+
+  const result = await checkPendingCode(user, code);
+  return { user, ...result };
+};
+
