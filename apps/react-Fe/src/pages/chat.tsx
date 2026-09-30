@@ -865,14 +865,29 @@ const ChatPage = () => {
   };
 
   // Resizable sidebar: width in px (defaults to ~1/3 of the viewport).
-  const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
-    typeof window !== "undefined"
-      ? Math.min(
-          Math.round(window.innerWidth / 3),
-          Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - CHAT_MIN_WIDTH),
-        )
-      : 420,
-  );
+  //
+  // Clamped at BOTH ends. The old expression was
+  //   Math.min(Math.round(innerWidth / 3), Math.max(SIDEBAR_MIN_WIDTH, ...))
+  // which reads as if the minimum were being honoured, but it isn't: the
+  // Math.max(SIDEBAR_MIN_WIDTH, ...) is the *upper* bound that the outer
+  // Math.min clamps against, so the expression had no floor whatsoever. On any
+  // window narrower than 3 x SIDEBAR_MIN_WIDTH the third-of-the-viewport default
+  // came out under the minimum — measured 300px at a 900px window, 320px at
+  // 960px, 341px at 1024px — and the other two width sources were fine, which
+  // is why it looked intermittent: dragging clamps with
+  // Math.max(..., SIDEBAR_MIN_WIDTH) and the resize handler only ever shrinks an
+  // already-legal value.
+  //
+  // Nothing is persisted, so every reload recomputed that same too-small default
+  // and silently undid the minimum. Raise the minimum and the symptom is a
+  // refresh, which is exactly what was reported.
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return SIDEBAR_MIN_WIDTH;
+    return Math.min(
+      Math.max(Math.round(window.innerWidth / 3), SIDEBAR_MIN_WIDTH),
+      maxSidebarWidth(),
+    );
+  });
 
   // Narrowing the window has to pull the sidebar in with it. It's a fixed pixel
   // width with flex-shrink-0, so without this it keeps the width it had at the
