@@ -119,6 +119,43 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
     .filter(Boolean)
     .join(", ");
 
+  /**
+   * The remote audio, rendered whether or not the full call UI is on screen.
+   *
+   * This used to live inside the full-screen branch only. `isMinimized`
+   * early-returns a small card, which unmounts the whole rest of the tree, and
+   * unmounting an <audio> element destroys it -- so playback stopped the moment
+   * the call was minimized and only came back on expand. The participant
+   * streams were untouched throughout; nothing was playing them. The mute
+   * button in the minimized card was therefore muting a call that had already
+   * gone silent.
+   *
+   * The comment this replaced claimed the tracks were "always-on ... so
+   * participants are heard even when the whiteboard is open and the video grid
+   * is hidden". They were only always-on with respect to the whiteboard; the
+   * second hidden-UI state was missed. Both now share this one element, so
+   * neither can drop the audio again.
+   *
+   * `sr-only` keeps it out of the layout completely -- no box, no gap in the
+   * card -- and `participant.stream` is the same MediaStream the video tiles
+   * use, so this adds no second connection and no renegotiation.
+   */
+  const alwaysOnAudio = (
+    <div className="sr-only" aria-hidden="true">
+      {participantArray.map((participant) => (
+        <audio
+          key={`audio-${participant.id}`}
+          autoPlay
+          playsInline
+          ref={(el) => {
+            if (el && el.srcObject !== participant.stream)
+              el.srcObject = participant.stream;
+          }}
+        />
+      ))}
+    </div>
+  );
+
   const handleToggleVideo = () => {
     void toggleLocalVideo();
   };
@@ -208,6 +245,9 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
               Leave
             </button>
           </div>
+
+          {/* The call keeps playing while it is minimized. See alwaysOnAudio. */}
+          {alwaysOnAudio}
         </div>
       </div>
     );
@@ -475,20 +515,9 @@ const GroupCallModal: React.FC<GroupCallModalProps> = ({ chatId }) => {
       </div>
 
       {/* Always-on hidden audio tracks so participants are heard even when
-          the whiteboard is open and the video grid is hidden. */}
-      <div className="sr-only" aria-hidden="true">
-        {participantArray.map((participant) => (
-          <audio
-            key={`audio-${participant.id}`}
-            autoPlay
-            playsInline
-            ref={(el) => {
-              if (el && el.srcObject !== participant.stream)
-                el.srcObject = participant.stream;
-            }}
-          />
-        ))}
-      </div>
+          the whiteboard is open and the video grid is hidden, and while the
+          call is minimized. Defined once above so both branches use it. */}
+      {alwaysOnAudio}
 
       {/* Controls bar */}
       <div className="mt-4 flex flex-shrink-0 items-center justify-center gap-4">
