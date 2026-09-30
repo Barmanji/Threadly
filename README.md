@@ -27,7 +27,7 @@ A retro-themed real-time chat application with built-in 1:1 & group video/audio 
 
 Threadly is a full-stack monorepo built with Turborepo. It provides real-time messaging, peer-to-peer video/audio calls, SFU-based group calls via mediasoup, a collaborative canvas whiteboard, and file sharing through Cloudinary — all wrapped in a retro neobrutalist UI.
 
-**Problem it solves:** WhatsApp Web lacks built-in calling(They did lack it before I started the app), and collaborative whiteboard features. Threadly brings all of these into a single unified interface.
+**Problem it solves:** WhatsApp Web lacks built-in calling (They did lack it before I started the app), and collaborative whiteboard features. Threadly brings all of these into a single unified interface.
 
 ---
 
