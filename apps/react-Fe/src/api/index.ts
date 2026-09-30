@@ -5,7 +5,7 @@ import axios, {
   type InternalAxiosRequestConfig,
 } from "axios";
 import type { ChatListItemInterface, ChatMessageInterface } from "../interfaces/chat";
-import type { FreeAPISuccessResponseInterface, LoginResponseData, RegisterResultData, ResendCodeResultData, VerifyEmailResultData } from "../interfaces/api";
+import type { CompleteRecoveryResultData, FreeAPISuccessResponseInterface, LoginResponseData, RecoveryCodeResultData, RegisterResultData, ResendCodeResultData, VerifyEmailResultData } from "../interfaces/api";
 import type { UserInterface } from "../interfaces/user";
 import { LocalStorage } from "../utils";
 
@@ -147,6 +147,40 @@ const resendVerificationCode = (data: {
     return apiClient.post("/user/resend-verification", data);
 };
 
+/**
+ * Ask for a code that authorises changing an existing account's details.
+ *
+ * Unauthenticated on purpose: the user reaching this has no session — they
+ * either abandoned a signup or forgot the password they signed up with. The
+ * emailed code is the credential.
+ */
+const requestAccountRecovery = (data: {
+    email: string;
+}): Promise<ApiResponse<RecoveryCodeResultData>> => {
+    return apiClient.post("/user/recover-account", data);
+};
+
+/**
+ * Send the code back, plus whichever of password / username / avatar changed.
+ *
+ * Multipart because the picture is optional and has to ride along when the user
+ * picked a new one; the text fields alone are enough to change a password.
+ * Nothing on the account is applied unless the code is valid.
+ */
+const completeAccountRecovery = (data: {
+    email: string;
+    code: string;
+    newPassword?: string;
+    newUsername?: string;
+    avatar?: File | null;
+}): Promise<ApiResponse<CompleteRecoveryResultData>> => {
+    return apiClient.post("/user/recover-account/complete", data, {
+        headers: {
+            "Content-Type": "multipart/form-data",
+        },
+    });
+};
+
 const logoutUser = (): Promise<ApiResponse<LoginResponseData>> => {
     return apiClient.post("/user/logout");
 };
@@ -269,6 +303,7 @@ const saveWhiteboardState = (
 // Export all the API functions
 export {
     addParticipantToGroup,
+    completeAccountRecovery,
     createGroupChat,
     createUserChat,
     deleteGroup,
@@ -284,6 +319,7 @@ export {
     reactToMessage,
     registerUser,
     removeParticipantFromGroup,
+    requestAccountRecovery,
     resendVerificationCode,
     saveWhiteboardState,
     sendMessage,

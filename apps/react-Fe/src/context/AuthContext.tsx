@@ -2,15 +2,19 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  completeAccountRecovery,
   loginUser,
   logoutUser,
   registerUser,
+  requestAccountRecovery,
   resendVerificationCode,
   verifyEmail,
 } from "../api";
 import Loader from "../components/Loader";
 import type { UserInterface } from "../interfaces/user";
 import type {
+  CompleteRecoveryResultData,
+  RecoveryCodeResultData,
   RegisterResultData,
   ResendCodeResultData,
   VerifyEmailResultData,
@@ -37,6 +41,16 @@ interface AuthContextValue {
   resendVerificationCode: (data: {
     email: string;
   }) => Promise<ResendCodeResultData | ApiFailure>;
+  requestAccountRecovery: (data: {
+    email: string;
+  }) => Promise<RecoveryCodeResultData | ApiFailure>;
+  completeAccountRecovery: (data: {
+    email: string;
+    code: string;
+    newPassword?: string;
+    newUsername?: string;
+    avatar?: File | null;
+  }) => Promise<CompleteRecoveryResultData | ApiFailure>;
   logout: () => Promise<void>;
   /** True only for the initial token restore, which gates the whole tree. */
   isBootstrapping: boolean;
@@ -51,6 +65,8 @@ const AuthContext = createContext<AuthContextValue>({
   register: async () => null,
   verifyEmail: async () => ({ message: "", statusCode: 0, code: "UNKNOWN", fieldErrors: [], isNetworkError: false }),
   resendVerificationCode: async () => ({ message: "", statusCode: 0, code: "UNKNOWN", fieldErrors: [], isNetworkError: false }),
+  requestAccountRecovery: async () => ({ message: "", statusCode: 0, code: "UNKNOWN", fieldErrors: [], isNetworkError: false }),
+  completeAccountRecovery: async () => ({ message: "", statusCode: 0, code: "UNKNOWN", fieldErrors: [], isNetworkError: false }),
   logout: async () => {},
   isBootstrapping: true,
   isAuthPending: false,
@@ -148,6 +164,56 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
     return failure ?? result!;
   };
 
+  /**
+   * Ask for a code that authorises changing an existing account's details.
+   *
+   * Reached from the register form when the address already has an account, so
+   * it also covers the real forgot-password case — the account is fully
+   * working, the user simply cannot get in.
+   */
+  const requestRecovery = async (data: { email: string }) => {
+    let result: RecoveryCodeResultData | null = null;
+
+    const failure = await requestHandler(
+      async () => await requestAccountRecovery(data),
+      setIsAuthPending,
+      (res) => {
+        result = res.data;
+      },
+      () => {},
+    );
+
+    return failure ?? result!;
+  };
+
+  /**
+   * Hand the code back with whatever the user changed.
+   *
+   * Returns no tokens on purpose. This is reached without a session, so
+   * minting one here would be a second, quieter way to take the account — the
+   * page logs in normally afterwards, with the password the user just chose.
+   */
+  const completeRecovery = async (data: {
+    email: string;
+    code: string;
+    newPassword?: string;
+    newUsername?: string;
+    avatar?: File | null;
+  }) => {
+    let result: CompleteRecoveryResultData | null = null;
+
+    const failure = await requestHandler(
+      async () => await completeAccountRecovery(data),
+      setIsAuthPending,
+      (res) => {
+        result = res.data;
+      },
+      () => {},
+    );
+
+    return failure ?? result!;
+  };
+
   const logout = async () => {
     await requestHandler(
       async () => await logoutUser(),
@@ -182,6 +248,8 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
         register,
         verifyEmail: verifyEmailCode,
         resendVerificationCode: resendCode,
+        requestAccountRecovery: requestRecovery,
+        completeAccountRecovery: completeRecovery,
         logout,
         isBootstrapping,
         isAuthPending,
