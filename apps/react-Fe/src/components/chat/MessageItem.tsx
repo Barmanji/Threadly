@@ -5,7 +5,6 @@ import {
     MagnifyingGlassPlusIcon,
     PaperClipIcon,
     TrashIcon,
-    XMarkIcon,
 } from "@heroicons/react/20/solid";
 import moment from "moment";
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +14,7 @@ import { REACTION_UI_ATTR, isReactionUi } from "../../utils/reactionUi";
 import RetroConfirm from "../RetroConfirm";
 import CallMessageBody from "./CallMessageBody";
 import EmojiPicker from "./EmojiPicker";
+import ImageLightbox from "./ImageLightbox";
 import {
     ReactionChips,
     ReactionTrigger,
@@ -157,28 +157,6 @@ const MessageItem: React.FC<{
         onReact(message, emoji);
     };
 
-    // Close the enlarged-image viewer when the user presses Escape.
-    useEffect(() => {
-        if (!resizedImage) return;
-
-        const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") {
-                setResizedImage(null);
-            }
-        };
-
-        window.addEventListener(
-            "keydown",
-            onKeyDown,
-        );
-
-        return () =>
-            window.removeEventListener(
-                "keydown",
-                onKeyDown,
-            );
-    }, [resizedImage]);
-
     const handleDownload = (
         e: React.MouseEvent,
         url: string,
@@ -200,22 +178,14 @@ const MessageItem: React.FC<{
 
     return (
         <>
-            {/* Enlarged image viewer */}
+            {/* Enlarged image viewer. Portalled to the body, so it covers the
+                viewport instead of being laid out by the message it came from
+                — see ImageLightbox. */}
             {resizedImage ? (
-                <div className="absolute inset-0 z-40 flex h-full w-full items-center justify-center overflow-hidden bg-black/70 p-8">
-                    <XMarkIcon
-                        className="absolute right-5 top-5 h-9 w-9 cursor-pointer text-white"
-                        onClick={() =>
-                            setResizedImage(null)
-                        }
-                    />
-
-                    <img
-                        className="h-full w-full object-contain"
-                        src={resizedImage}
-                        alt="chat image"
-                    />
-                </div>
+                <ImageLightbox
+                    src={resizedImage}
+                    onClose={() => setResizedImage(null)}
+                />
             ) : null}
 
             {/* MESSAGE ROW */}
