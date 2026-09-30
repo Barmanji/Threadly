@@ -49,8 +49,6 @@ import {
   requestHandler,
 } from "../utils";
 
-const CONNECTED_EVENT = "connected";
-const DISCONNECT_EVENT = "disconnect";
 const JOIN_CHAT_EVENT = "joinChat";
 const NEW_CHAT_EVENT = "newChat";
 const TYPING_EVENT = "typing";
@@ -108,8 +106,9 @@ const ChatPage = () => {
   // stable even if the user navigates to a different chat during the call.
   const callPeerIdRef = useRef<string | null>(null);
 
-  // Define state variables and their initial values using 'useState'
-  const [isConnected, setIsConnected] = useState(false); // For tracking socket connection
+  // Socket connection state comes from the context (single source of truth);
+  // a local duplicate here caused the "need to refresh once" race because the
+  // page never got its connect event even when the shared socket was connected.
 
   const [openAddChat, setOpenAddChat] = useState(false); // To control the 'Add Chat' modal
   const [loadingChats, setLoadingChats] = useState(false); // To indicate loading of chats
@@ -235,19 +234,27 @@ const ChatPage = () => {
 
   // Function to send a chat message
   const sendChatMessage = async () => {
-    // If no current chat ID exists or there's no socket connection, exit the function
-    if (!currentChat.current?._id || !socket || !isConnected) return;
-
+    // Only a missing chat stops the send. The message itself travels over HTTP
+    // (`sendMessage` below), so gating it on the socket meant a not-yet-handshaken
+    // socket silently swallowed the first message after landing on /chat — the
+    // "refresh once and it works" bug. The socket is only used for the
+    // best-effort typing hints, so a disconnected one must not block sending.
     const chatId = currentChat.current?._id;
+    if (!chatId) return;
+
     const rawMessage = message;
     const rawFiles = attachedFiles;
     if (!rawMessage.trim() && rawFiles.length === 0) return;
 
-    // Emit a STOP_TYPING_EVENT to inform other users/participants that typing has stopped
-    socket.emit(STOP_TYPING_EVENT, {
-      chatId,
-      sender: { _id: user?._id, username: user?.username },
-    });
+    // Emit a STOP_TYPING_EVENT to inform other users/participants that typing
+    // has stopped. Best-effort: a peer that misses this hint just sees the
+    // typing indicator time out on its own, which it already handles.
+    if (socket?.connected) {
+      socket.emit(STOP_TYPING_EVENT, {
+        chatId,
+        sender: { _id: user?._id, username: user?.username },
+      });
+    }
 
     // Optimistically show a WhatsApp-style pending bubble so the user knows the
     // message is in transit and can keep typing/sending.
@@ -385,14 +392,6 @@ const ChatPage = () => {
       // Reset the user's typing state
       setSelfTyping(false);
     }, timerLength);
-  };
-
-  const onConnect = () => {
-    setIsConnected(true);
-  };
-
-  const onDisconnect = () => {
-    setIsConnected(false);
   };
 
   /**
@@ -722,17 +721,15 @@ const ChatPage = () => {
 
     // Make sure we're actually connected. The socket is created eagerly by
     // SocketContext, but the handshake is still async — kick it if it hasn't
-    // completed yet. No user-facing noise: `isConnected` from the context is
-    // what gates anything that needs a live connection.
+    // completed yet. No user-facing noise: nothing on this page is gated on a
+    // live socket, so sending works even while the handshake is still in flight.
     if (!socket.connected) {
       socket.connect();
     }
 
     // Set up event listeners for various socket events:
     // Listener for when the socket connects.
-    socket.on(CONNECTED_EVENT, onConnect);
     // Listener for when the socket disconnects.
-    socket.on(DISCONNECT_EVENT, onDisconnect);
     // Listener for when a user is typing.
     socket.on(TYPING_EVENT, handleOnSocketTyping);
     // Listener for when a user stops typing.
@@ -752,8 +749,6 @@ const ChatPage = () => {
     // When the component using this hook unmounts or if `socket` or `chats` change:
     return () => {
       // Remove all the event listeners we set up to avoid memory leaks and unintended behaviors.
-      socket.off(CONNECTED_EVENT, onConnect);
-      socket.off(DISCONNECT_EVENT, onDisconnect);
       socket.off(TYPING_EVENT, handleOnSocketTyping);
       socket.off(STOP_TYPING_EVENT, handleOnSocketStopTyping);
       socket.off(MESSAGE_RECEIVED_EVENT, onMessageReceived);
