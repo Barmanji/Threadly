@@ -7,6 +7,7 @@ import {
   type EmojiSection,
 } from "./reactionEmojis";
 import { classNames } from "../../utils";
+import { REACTION_UI_ATTR } from "../../utils/reactionUi";
 
 interface EmojiPickerProps {
   /** Called with the chosen emoji. */
@@ -144,6 +145,7 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
       ref={panelRef}
       role="dialog"
       aria-label="Emoji picker"
+      {...{ [REACTION_UI_ATTR]: "" }}
       className="neo fixed z-[100] flex flex-col bg-paper"
       style={{
         width: PICKER_WIDTH,

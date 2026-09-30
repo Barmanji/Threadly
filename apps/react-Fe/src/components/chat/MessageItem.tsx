@@ -11,6 +11,7 @@ import moment from "moment";
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessageInterface } from "../../interfaces/chat";
 import { classNames, formatBytes, getFileKind, downloadFile } from "../../utils";
+import { REACTION_UI_ATTR, isReactionUi } from "../../utils/reactionUi";
 import RetroConfirm from "../RetroConfirm";
 import CallMessageBody from "./CallMessageBody";
 import EmojiPicker from "./EmojiPicker";
@@ -71,18 +72,45 @@ const MessageItem: React.FC<{
         setEmojiPickerOpen(true);
     };
 
-    const handleBubbleTap = () => {
+    /**
+     * A tap on the bubble reveals the reaction trigger. Mobile only, because
+     * that's the only place there is no hover to do it for us.
+     *
+     * The guard matters more than it looks: the trigger is a 32px button that
+     * sits just outside the bubble, so a slightly-missed finger lands on the
+     * bubble instead. Without this, that near-miss toggled the trigger shut
+     * again — the icon vanished and nothing opened, which is the exact
+     * symptom this whole dance is trying to avoid.
+     */
+    const handleBubbleTap = (
+        e: React.MouseEvent<HTMLDivElement>,
+    ) => {
         // `(hover: none)` is the reliable signal for "this device taps rather
         // than points" — a mouse can hover, a finger cannot.
         if (
-            window.matchMedia("(hover: none)").matches
+            !window.matchMedia("(hover: none)")
+                .matches
         ) {
-            setTouchOpen((prev) => !prev);
+            return;
         }
+
+        // Never toggle from a tap that started on the reaction UI itself.
+        if (isReactionUi(e.target)) return;
+
+        setTouchOpen((prev) => !prev);
     };
 
-    // Tapping outside the message closes it. Clicks inside the wrapper are
-    // ignored so the toolbar's own buttons don't dismiss it.
+    /**
+     * Tapping outside the message closes the trigger.
+     *
+     * "Inside" has to cover the popovers too, not just the message wrapper.
+     * Both the quick-reaction bar and the full picker are rendered through
+     * `createPortal` onto `document.body`, so they are DOM siblings of the
+     * whole chat page, not descendants of `wrapRef`. Testing only
+     * `wrapRef.contains(target)` therefore treated every tap on an open
+     * popover as an outside tap and tore the trigger down from under the
+     * user's finger.
+     */
     useEffect(() => {
         if (!touchOpen) return;
 
@@ -94,6 +122,8 @@ const MessageItem: React.FC<{
             ) {
                 return;
             }
+
+            if (isReactionUi(e.target)) return;
 
             setTouchOpen(false);
         };
@@ -524,6 +554,15 @@ const MessageItem: React.FC<{
 {canReact ? (
     <div
         onClick={(e) => e.stopPropagation()}
+        /*
+         * The row's own toggle listens on `click`, but the close-on-outside
+         * effect listens on `pointerdown`. Stopping propagation on only one
+         * of the two left the trigger half-protected: `pointerdown` still
+         * reached the document handler. Stopping both means a tap that
+         * starts on the trigger can never be mistaken for a tap outside it.
+         */
+        onPointerDown={(e) => e.stopPropagation()}
+        {...{ [REACTION_UI_ATTR]: "" }}
         className={classNames(
             "absolute top-1/2 z-40 -translate-y-1/2",
             "transition-opacity duration-100",
@@ -533,17 +572,39 @@ const MessageItem: React.FC<{
                 : "left-full ml-2",
 
             /*
-             * Keep the trigger interactive while we're hovering it.
+             * Exactly one of each conflicting pair is ever emitted.
+             *
+             * Listing "pointer-events-none opacity-0" as a fixed base class
+             * and then conditionally appending "pointer-events-auto
+             * opacity-100" looks equivalent, and on a mouse it is. It is not
+             * on a phone. Both utilities have the same specificity, so which
+             * one applies is decided purely by the order Tailwind emits them
+             * in the built stylesheet -- not by their order in this string.
+             * In this build `.pointer-events-none` lands at byte 7720 and
+             * `.pointer-events-auto` at 7679, so `none` always won.
+             *
+             * That produced the exact reported symptom: the trigger turned
+             * visible (because `.opacity-100` IS emitted after `.opacity-0`)
+             * while remaining `pointer-events: none`, so the tap that was
+             * supposed to open the picker landed on the bubble instead,
+             * toggled the toolbar shut, and the icon appeared to vanish.
+             * Desktop never showed it because `group-hover:` is a variant and
+             * variants are emitted in a later section, after the base
+             * utilities.
              */
-            "pointer-events-none opacity-0",
+            touchOpen
+                ? "pointer-events-auto opacity-100"
+                : "pointer-events-none opacity-0",
 
+            /*
+             * Desktop reveals the trigger by hover, and keyboard focus does
+             * the same so the toolbar is reachable without a pointer. Both
+             * are variants, so they sit after the base utilities in the sheet
+             * and are not affected by the ordering above.
+             */
             "group-hover:pointer-events-auto group-hover:opacity-100",
 
             "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-
-            touchOpen
-                ? "pointer-events-auto opacity-100"
-                : "",
         )}
     >
         {/* Invisible bridge between bubble and reaction button */}
