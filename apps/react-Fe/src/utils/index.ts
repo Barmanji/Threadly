@@ -24,6 +24,24 @@ export interface ApiFailure {
   isNetworkError: boolean;
 }
 
+/**
+ * Partially mask an address, mirroring the server's `maskEmail` in
+ * `emailVerification.service.ts`.
+ *
+ * Needed client-side only where the server has nothing to mask for us:
+ * `POST /user/resend-verification` echoes no address back, but the UI still
+ * wants to show which one a code was just sent to. Display only — if the two
+ * implementations ever drift the worst case is a cosmetic difference.
+ */
+export const maskEmail = (email: string): string => {
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return email;
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"*".repeat(
+    Math.max(3, local.length - visible.length),
+  )}@${domain}`;
+};
+
 /** Turn an axios rejection into an `ApiFailure` with a usable message. */
 export const toApiFailure = (error: unknown): ApiFailure => {
   const fallback = (message: string, statusCode = 0, isNetworkError = false): ApiFailure => ({

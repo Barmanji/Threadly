@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { MessageReactionInterface } from "../../interfaces/chat";
 import { classNames } from "../../utils";
+import { REACTION_UI_ATTR } from "../../utils/reactionUi";
 import { QUICK_REACTIONS } from "./reactionEmojis";
 
 interface ReactionGroup {
@@ -219,6 +220,7 @@ const ReactionPickerPopover: React.FC<{
       ref={panelRef}
       role="dialog"
       aria-label="React to this message"
+      {...{ [REACTION_UI_ATTR]: "" }}
       className="
         neo-sm
         fixed
@@ -260,6 +262,11 @@ const ReactionPickerPopover: React.FC<{
               focus:scale-125
               focus:outline-none
             `,
+            // Without this a quick second tap anywhere on the page is
+            // eligible to be read as a double-tap zoom, and the browser
+            // withholds the click while it decides. See the same class on
+            // ReactionTrigger, which is where that actually bit us.
+            "touch-manipulation",
             myReaction === emoji
               ? "bg-retro-yellow"
               : "",
@@ -283,6 +290,7 @@ const ReactionPickerPopover: React.FC<{
           rounded-sm
           text-ink/50
           transition-colors
+          touch-manipulation
           hover:bg-ink/10
           hover:text-ink
         "
@@ -345,6 +353,7 @@ export const ReactionTrigger: React.FC<
           text-ink/60
           shadow-[2px_2px_0_0_var(--color-ink)]
           transition-colors
+          touch-manipulation
           hover:bg-retro-yellow
           hover:text-ink
         "

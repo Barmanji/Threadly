@@ -5,6 +5,8 @@ import {
     registerUser,
     verifyEmail,
     resendVerificationCode,
+    requestAccountRecovery,
+    completeAccountRecovery,
     loginUser,
     logoutUser,
     refreshAccessToken,
@@ -37,6 +39,22 @@ router.route("/login").post(loginUser);
 // The emailed code IS the credential here.
 router.route("/verify-email").post(verifyEmail);
 router.route("/resend-verification").post(resendVerificationCode);
+// Account recovery — also unauthenticated, for the same reason: the caller has
+// no tokens, and the emailed code is the credential. Unlike /register, nothing
+// on the account changes until that code comes back.
+//
+// `complete` takes multipart because it can carry a new picture. The picture
+// is optional; the text fields alone are enough to change a password.
+router.route("/recover-account").post(requestAccountRecovery);
+router.route("/recover-account/complete").post(
+    upload.fields([
+        {
+            name: "avatar",
+            maxCount: 1,
+        },
+    ]),
+    completeAccountRecovery,
+);
 router.route("/refresh-token").post(refreshAccessToken);
 router.route("/get-any-user-friend-list/c/:username").get(getAnyUserFriendList);
 router.route("/c/:username").get(getUserProfile);

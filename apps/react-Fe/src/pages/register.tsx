@@ -1,5 +1,5 @@
 import { ArrowLeftIcon, LockClosedIcon } from "@heroicons/react/20/solid";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import Button from "../components/Button";
@@ -9,7 +9,11 @@ import OtpInput from "../components/OtpInput";
 import ThemeToggle from "../components/ThemeToggle";
 import ChangelogLink from "../components/ChangelogLink";
 import { useAuth } from "../context/AuthContext";
-import { LocalStorage, type ApiFailure } from "../utils";
+import {
+    LocalStorage,
+    maskEmail,
+    type ApiFailure,
+} from "../utils";
 import {
   EMPTY_REGISTER_ERRORS,
   PASSWORD_RULES,
@@ -26,8 +30,15 @@ const RESEND_COOLDOWN_SECONDS = 60;
 
 const Register = () => {
   const navigate = useNavigate();
-  const { register, verifyEmail, resendVerificationCode, isAuthPending } =
-    useAuth();
+  const {
+    register,
+    verifyEmail,
+    resendVerificationCode,
+    requestAccountRecovery,
+    completeAccountRecovery,
+    login,
+    isAuthPending,
+  } = useAuth();
 
   /**
    * Single source of truth for the form, and deliberately NEVER reset by an
@@ -67,11 +78,67 @@ const Register = () => {
   const [resendIn, setResendIn] = useState(0);
 
   /**
+   * Set when the server rejects the email as already registered, which is
+   * also what happens when the account exists but was never verified — the
+   * case where this form can no longer get the user a code, because a
+   * duplicate is a duplicate whether or not it has been proven yet.
+   *
+   * `problem` carries whatever the resend attempt answered with, so a real
+   * account ("already verified") can say so next to a login link instead of
+   * silently doing nothing.
+   */
+  const [pendingVerification, setPendingVerification] = useState<{
+    email: string;
+    problem?: string;
+  } | null>(null);
+
+  /**
+   * True once the user has asked for a code whose purpose is to change an
+   * EXISTING account, rather than to finish creating a new one.
+   *
+   * It changes what the code step does with the digits: `verify-email` merely
+   * confirms the address, `recover-account/complete` also applies the password,
+   * username and picture the user typed. The flag is deliberately sticky — it
+   * survives a trip back to the form, because the code in `code` is only
+   * invalidated by the server, never by the client.
+   */
+  const [recoveryMode, setRecoveryMode] = useState(false);
+
+  /**
+   * What the recovery code is about to change, read straight off `values`.
+   *
+   * Not stashed at request time on purpose: the code only proves inbox
+   * ownership, it is not bound to a particular set of details, so a user who
+   * changes their mind before typing the digits must not be locked into what
+   * they had when they pressed the button. The form is never reset either, so
+   * `values` still holds the last thing they typed either way.
+   *
+   * An empty list is legitimate rather than an error — it is how an abandoned
+   * registration is finished without changing anything.
+   */
+  const pendingChanges = useMemo(() => {
+    const changes: string[] = [];
+    if (values.password) changes.push("password");
+    if (values.username) changes.push("username");
+    if (values.avatar) changes.push("picture");
+    return changes;
+  }, [values.password, values.username, values.avatar]);
+
+  /**
    * "Popup after the user has finished typing the password" — one shot, on
    * the first blur after a pause. Never repeats, and never fires mid-keystroke.
    */
   const passwordToastShown = useRef(false);
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * The picture input, so a chosen file can be put back the way it was.
+   *
+   * Needed because a file input cannot be unset by typing: once a picture is
+   * chosen there was no way back, which turned the recovery panel's offer to
+   * "just confirm the address and change nothing" into a promise the UI could
+   * not keep — the picture was already committed to.
+   */
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -101,6 +168,19 @@ const Register = () => {
       const next: RegisterValues = { ...values, [field]: e.target.value };
       setValues(next);
 
+      // The recovery panel is pinned to one address; changing the address
+      // invalidates it.
+      if (field === "email" && pendingVerification) {
+        setPendingVerification(null);
+        // A code we already hold was sent to the OLD address, so it is no
+        // longer evidence about this one. Staying in recovery mode would let
+        // the submit button try to apply it to a different account.
+        if (values.email.trim() !== pendingVerification.email) {
+          setRecoveryMode(false);
+          setCode("");
+        }
+      }
+
       // Real-time: re-validate as they type, as soon as the field has
       // content. Empty means "not typed yet", not "wrong".
       if (touched[field] || e.target.value.length > 0) {
@@ -117,6 +197,19 @@ const Register = () => {
     setValues(next);
     setTouched((prev) => ({ ...prev, avatar: true }));
     applyFieldError("avatar", validateRegisterField("avatar", next));
+  };
+
+  /**
+   * Undo a picture choice.
+   *
+   * The input's own value is cleared as well as the state, because leaving
+   * `File` in the element would let the browser re-populate it on a later form
+   * restore and quietly re-apply a picture the user had removed.
+   */
+  const handleAvatarClear = () => {
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
+    setValues((prev) => ({ ...prev, avatar: null }));
+    applyFieldError("avatar", "");
   };
 
   const handlePasswordBlur = () => {
@@ -152,16 +245,88 @@ const Register = () => {
         [fieldError.path as RegisterField]: true,
       }));
       applyFieldError(fieldError.path as RegisterField, fieldError.message);
+
+      // A 409 on the email is ambiguous: the address may belong to a live
+      // account, or to a half-finished registration whose code was never
+      // entered. The second is the one that dead-ends, because the register
+      // endpoint refuses it just the same. So offer the one request that
+      // can still make progress — ask for a fresh code. The resend endpoint
+      // answers "already verified" if the account is real, which is the
+      // honest answer and needs no new server code to give.
+      const isUnverifiableEmail =
+        fieldError.path === "email" && failure.statusCode === 409;
+
+      setPendingVerification(
+        isUnverifiableEmail
+          ? { email: values.email.trim() }
+          : null,
+      );
+
       return;
     }
 
+    setPendingVerification(null);
     toast.error(failure.message);
+  };
+
+  /**
+   * Shared by a successful register and the "email me a code" recovery, so both
+   * land on the verify step with identical state.
+   */
+  const enterVerifyStep = (
+    masked: string,
+    cooldownSeconds: number,
+    attempts: number | null,
+    recovering = false,
+  ) => {
+    setMaskedEmail(masked);
+    if (attempts !== null) setMaxAttempts(attempts);
+    setCode("");
+    setCodeError("");
+    setAttemptsLeft(null);
+    setResendIn(cooldownSeconds);
+    setPendingVerification(null);
+    setRecoveryMode(recovering);
+    setStep("verify");
+  };
+
+  /**
+   * Drive the "N attempts left" counter from the server's own message rather
+   * than guessing on the client, so the number the user reads is the number the
+   * server will enforce.
+   */
+  const applyAttemptsFromMessage = (message: string) => {
+    const match = message.match(/(\d+)\s+attempt/i);
+    if (match) setAttemptsLeft(Number(match[1]));
+    else if (/all \d+ attempts|no attempts/i.test(message)) setAttemptsLeft(0);
   };
 
   // --- Submit ------------------------------------------------------------
   const handleRegister = async () => {
     setSubmitted(true);
     setTouched({ email: true, username: true, password: true, avatar: true });
+
+    /*
+     * Already holding a recovery code: apply it, rather than asking the server
+     * to create an account we already know exists. `completeRecovery` is
+     * defined below this call, but by the time a click arrives it is
+     * initialised.
+     *
+     * This branch deliberately comes BEFORE `validateRegisterForm`, and the
+     * order is the whole point. The form's job is no longer "create an
+     * account", so the create-account rules no longer describe what the user is
+     * trying to do — and running them first refuses the two cases this flow
+     * exists for: changing only the picture, and finishing a signup with
+     * nothing to change at all. Both are blocked by "Username is required" /
+     * "Password is required" on a form that does not need them.
+     *
+     * Each field is still validated on its own as it is typed and on blur, and
+     * the server has the final say on every one of them below.
+     */
+    if (recoveryMode && code.length === 6) {
+      await completeRecovery(values.email.trim(), code);
+      return;
+    }
 
     const nextErrors = validateRegisterForm(values);
     setErrors(nextErrors);
@@ -185,6 +350,7 @@ const Register = () => {
     setCodeError("");
     setAttemptsLeft(null);
     setResendIn(RESEND_COOLDOWN_SECONDS);
+    setPendingVerification(null);
     setStep("verify");
 
     if (outcome.data.emailSent) {
@@ -192,6 +358,65 @@ const Register = () => {
     } else {
       toast.error("We couldn't send the email. Use “Resend code” below.");
     }
+  };
+
+  /**
+   * Ask for a code for an address the register endpoint already refused.
+   *
+   * A duplicate address is not only an abandoned signup. It is just as often a
+   * working account whose password the user cannot remember — which is why
+   * this asks `recover-account` rather than the ordinary resend endpoint. The
+   * resend one refuses a confirmed address ("already verified"), so it made
+   * the most common version of this dead end: a real account, no way in.
+   *
+   * The password, username and picture the user has already typed are NOT sent
+   * here and are not stashed. The code only proves they can read the inbox;
+   * those details are submitted alongside it, and only then applied.
+   */
+  const handleRecoverWithCode = async () => {
+    if (!pendingVerification) return;
+
+    const target = pendingVerification.email;
+    const result = await requestAccountRecovery({ email: target });
+
+    if ("message" in result) {
+      // Rate limited means a code was already sent inside the cooldown window,
+      // so the one already sitting in their inbox is the right one to use. Send
+      // them to it rather than leaving them on a dead form.
+      if (result.code === "RATE_LIMITED") {
+        // The message reads "Please wait 42 seconds before requesting…". Parse
+        // the number out of it so the countdown the user sees is the real one
+        // rather than a guess. `Number(...)` can never be nullish -- an
+        // unmatched string yields NaN, which would survive the `??` and put
+        // NaN into the timer -- so the fallback belongs on the match itself.
+        const parsed = result.message.match(/(\d+)\s+second/)?.[1];
+        const seconds = parsed ? Number(parsed) : RESEND_COOLDOWN_SECONDS;
+
+        enterVerifyStep(maskEmail(target), seconds, null, true);
+        toast.message("We already sent a code to that address", {
+          description: "Use the most recent one — we didn't send another.",
+        });
+        return;
+      }
+
+      // Anything else — an unknown address, or the mail provider being down.
+      // Stay on the form with the details intact so a second attempt costs
+      // them nothing.
+      setPendingVerification({
+        email: target,
+        problem: result.message,
+      });
+      return;
+    }
+
+    enterVerifyStep(
+      maskEmail(target),
+      result.cooldownSeconds ?? RESEND_COOLDOWN_SECONDS,
+      result.maxAttempts,
+      true,
+    );
+
+    toast.success(`New code sent to ${maskEmail(target)}`);
   };
 
   // --- Verification ------------------------------------------------------
@@ -202,30 +427,103 @@ const Register = () => {
     }
 
     setCodeError("");
-    const result = await verifyEmail({ email: values.email.trim(), code });
+    const email = values.email.trim();
+
+    if (recoveryMode) {
+      await completeRecovery(email, code);
+      return;
+    }
+
+    const result = await verifyEmail({ email, code });
 
     if ("message" in result) {
       // Failed. `requestHandler` already produced a precise message, which
       // includes the remaining-attempt count.
       setCodeError(result.message);
-
-      // Pull "N attempts left" out of the field error so the counter is
-      // driven by the server rather than guessed at on the client.
-      const match = result.message.match(/(\d+)\s+attempt/i);
-      if (match) setAttemptsLeft(Number(match[1]));
-      else if (/all \d+ attempts|no attempts/i.test(result.message))
-        setAttemptsLeft(0);
+      applyAttemptsFromMessage(result.message);
       return;
     }
 
     toast.success("Email verified — you can log in now.");
     // Hand the address to the login form so they don't retype it.
-    LocalStorage.set("prefillEmail", values.email.trim());
+    LocalStorage.set("prefillEmail", email);
     navigate("/login");
   };
 
+  /**
+   * Confirm a recovery code and apply the changed details.
+   *
+   * Shared by the code step's button and the form's submit button, so a user
+   * sent back to fix one field can resubmit without retyping the code.
+   */
+  const completeRecovery = async (email: string, submittedCode: string) => {
+    const result = await completeAccountRecovery({
+      email,
+      code: submittedCode,
+      // Sent only when filled, never as an empty string, so the server can
+      // tell "leave this alone" apart from "set this to nothing".
+      newPassword: values.password || undefined,
+      newUsername: values.username || undefined,
+      avatar: values.avatar,
+    });
+
+    if ("message" in result) {
+      applyAttemptsFromMessage(result.message);
+
+      // A complaint about the DETAILS rather than the code. The server
+      // deliberately leaves the code valid in that case, so send the user
+      // back to the form, error on the offending input, and let them resubmit
+      // the same six digits.
+      const detailProblem = result.fieldErrors.find((e) =>
+        ["username", "password", "avatar"].includes(e.path),
+      );
+
+      if (detailProblem) {
+        const field = detailProblem.path as RegisterField;
+        setTouched((prev) => ({ ...prev, [field]: true }));
+        applyFieldError(field, detailProblem.message);
+        setStep("form");
+        return;
+      }
+
+      setCodeError(result.message);
+      return;
+    }
+
+    // The code proved control of the inbox, which is the one thing this flow
+    // could not assume. The user is their own, so send them straight in.
+    //
+    // Only when the password is one they just chose: otherwise we never knew
+    // the account's real password, and guessing would produce a confusing
+    // failure in place of a clear "log in" page.
+    if (values.password) {
+      await login({ username: email, password: values.password });
+      return;
+    }
+
+    toast.success(
+      result.changed.length
+        ? "Account updated — log in to continue."
+        : "Email confirmed — log in to continue.",
+    );
+    LocalStorage.set("prefillEmail", email);
+    navigate("/login");
+  };
+
+  /**
+   * Send the code again.
+   *
+   * In recovery mode this must go to `recover-account`, not to
+   * `/resend-verification`. That was the actual dead end in this flow: the
+   * account being recovered from is often perfectly healthy, and the resend
+   * endpoint answers a confirmed address with "already verified" — so the one
+   * user who most needed a new code could never ask for one.
+   */
   const handleResend = async () => {
-    const result = await resendVerificationCode({ email: values.email.trim() });
+    const email = values.email.trim();
+    const result = recoveryMode
+      ? await requestAccountRecovery({ email })
+      : await resendVerificationCode({ email });
 
     if ("message" in result) {
       toast.error(result.message);
@@ -236,7 +534,7 @@ const Register = () => {
     setCode("");
     setCodeError("");
     setAttemptsLeft(null);
-    toast.success(`New code sent to ${maskedEmail || values.email.trim()}`);
+    toast.success(`New code sent to ${maskedEmail || email}`);
   };
 
   // --- Render ------------------------------------------------------------
@@ -254,20 +552,47 @@ const Register = () => {
         <div className="neo my-8 flex w-full max-w-md flex-col items-center gap-5 bg-retro-orange p-8">
           <h1 className="neo-sm flex flex-col items-center bg-cream px-6 py-2 text-center text-2xl">
             <LockClosedIcon className="mb-2 h-8 w-8 text-retro-orange" />
-            Verify your email
+            {recoveryMode ? "Confirm it’s you" : "Verify your email"}
           </h1>
 
           <p className="text-center text-sm font-semibold leading-relaxed text-ink">
-            We sent a 6-digit code to{" "}
-            <span className="font-extrabold">
-              {maskedEmail || values.email}
-            </span>
-            . Enter it below to finish setting up your account.
+            {recoveryMode ? (
+              <>
+                We sent a 6-digit code to{" "}
+                <span className="font-extrabold">
+                  {maskedEmail || values.email}
+                </span>
+                . Enter it and we&apos;ll update that account
+                {pendingChanges.length
+                  ? ` — changing its ${pendingChanges.join(", ")}.`
+                  : "."}
+              </>
+            ) : (
+              <>
+                We sent a 6-digit code to{" "}
+                <span className="font-extrabold">
+                  {maskedEmail || values.email}
+                </span>
+                . Enter it below to finish setting up your account.
+              </>
+            )}
             <p className="text-center text-sm font-semibold leading-relaxed text-ink">
               check the <span className="font-extrabold">spam folder </span>
                if you can't find code in inbox.
             </p>
           </p>
+
+          {/* Restating the pending changes here, away from the form: on this
+              screen the user has nothing in front of them saying what they
+              asked for, and "update that account" is a bigger promise than
+              "confirm your email" needs a recap for. */}
+          {recoveryMode && pendingChanges.length > 0 ? (
+            <ul className="w-full list-inside list-disc bg-cream p-3 text-xs font-bold leading-relaxed text-ink">
+              {pendingChanges.map((change) => (
+                <li key={change}>Change the {change}</li>
+              ))}
+            </ul>
+          ) : null}
 
           <OtpInput
             value={code}
@@ -301,7 +626,11 @@ const Register = () => {
             disabled={isAuthPending || code.length !== 6}
             onClick={handleVerify}
           >
-            {isAuthPending ? "Verifying…" : "Verify and continue"}
+            {isAuthPending
+              ? "Checking…"
+              : recoveryMode
+                ? "Confirm and update"
+                : "Verify and continue"}
           </Button>
 
           <button
@@ -313,18 +642,40 @@ const Register = () => {
             {resendIn > 0 ? `Resend code in ${resendIn}s` : "Resend code"}
           </button>
 
-          {/* Back to the form with every field still populated. */}
-          <button
-            type="button"
-            onClick={() => {
-              setStep("form");
-              setCodeError("");
-            }}
-            className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
-          >
-            <ArrowLeftIcon className="h-4 w-4" aria-hidden="true" />
-            Use a different email
-          </button>
+          {recoveryMode ? (
+            /*
+              Back to the fields WITHOUT throwing the code away. The server has
+              only validated it, not spent it, so a user who spots a typo in
+              the password after entering the code should be able to fix it and
+              come straight back rather than wait out the resend cooldown.
+              `code` and `recoveryMode` are both preserved, which is also what
+              makes the form's submit button apply the change directly.
+            */
+            <button
+              type="button"
+              onClick={() => {
+                setStep("form");
+                setCodeError("");
+              }}
+              className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
+            >
+              <ArrowLeftIcon className="h-4 w-4" aria-hidden="true" />
+              Change my details
+            </button>
+          ) : (
+            /* Back to the form with every field still populated. */
+            <button
+              type="button"
+              onClick={() => {
+                setStep("form");
+                setCodeError("");
+              }}
+              className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
+            >
+              <ArrowLeftIcon className="h-4 w-4" aria-hidden="true" />
+              Use a different email
+            </button>
+          )}
         </div>
       </div>
     );
@@ -364,6 +715,79 @@ const Register = () => {
             error={touched.email ? errors.email : ""}
           />
           <FieldError message={touched.email ? errors.email : ""} />
+
+          {/*
+            Recovery for the dead end: this address already has an account, so
+            submitting the form again can never create one. Shown only on a 409
+            against the email field — a username collision has no equivalent,
+            because both recovery endpoints key off the address.
+
+            The account may be an abandoned signup or a perfectly healthy one
+            whose password has been forgotten, and the same code fixes both,
+            which is why the copy promises neither specifically.
+          */}
+          {pendingVerification ? (
+            <div className="neo-sm mt-3 flex flex-col gap-2 bg-cream p-3">
+              <p className="text-xs font-bold leading-relaxed text-ink">
+                This email already has an account, so this form can&apos;t
+                create another. We can email you a code to confirm it&apos;s
+                yours — then the details you fill in below replace that
+                account&apos;s.
+              </p>
+
+              {/* Never a surprise: this is exactly what the code will change. */}
+              {pendingChanges.length > 0 ? (
+                <ul className="list-inside list-disc text-xs font-bold leading-relaxed text-ink">
+                  {pendingChanges.map((change) => (
+                    <li key={change}>Change the {change}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs font-bold leading-relaxed text-ink">
+                  With those left empty we&apos;ll simply confirm the address
+                  and keep the account&apos;s existing details.
+                </p>
+              )}
+
+              {pendingVerification.problem ? (
+                <p className="text-xs font-extrabold leading-relaxed text-retro-red">
+                  {pendingVerification.problem}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  size="small"
+                  severity="secondary"
+                  disabled={isAuthPending}
+                  onClick={handleRecoverWithCode}
+                >
+                  {isAuthPending ? "Sending…" : "Email me a code"}
+                </Button>
+
+                {/* Always offered, because the account may simply be working
+                    and the user may not have come here to change it at all —
+                    they may have typed a fresh password to replace the old one
+                    and then had second thoughts. */}
+                <Link
+                  to="/login"
+                  className="text-[11px] font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
+                >
+                  Log in instead
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setPendingVerification(null)
+                  }
+                  className="text-[11px] font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="w-full">
@@ -421,6 +845,7 @@ const Register = () => {
           </label>
           <Input
             id="register-avatar"
+            ref={avatarInputRef}
             type="file"
             accept="image/*"
             onChange={handleAvatarChange}
@@ -428,14 +853,29 @@ const Register = () => {
           />
           {submitted ? <FieldError message={errors.avatar} /> : null}
           {values.avatar ? (
-            <p className="mt-1.5 text-[11px] font-semibold text-ink/70">
-              Selected: {values.avatar.name}
-            </p>
+            <div className="mt-1.5 flex items-center justify-between gap-3">
+              <p className="text-[11px] font-semibold text-ink/70">
+                Selected: {values.avatar.name}
+              </p>
+              <button
+                type="button"
+                onClick={handleAvatarClear}
+                className="flex-shrink-0 text-[11px] font-extrabold uppercase tracking-wide text-ink underline underline-offset-4"
+              >
+                Remove
+              </button>
+            </div>
           ) : null}
         </div>
 
         <Button fullWidth disabled={isAuthPending} onClick={handleRegister}>
-          {isAuthPending ? "Creating your account…" : "Register"}
+          {isAuthPending
+            ? "Creating your account…"
+            : // Back on the form holding a recovery code: the account exists,
+              // so "Register" would be a lie that only produces a 409.
+              recoveryMode && code.length === 6
+              ? "Confirm and update"
+              : "Register"}
         </Button>
 
         <small className="font-bold text-ink">

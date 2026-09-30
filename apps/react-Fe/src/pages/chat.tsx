@@ -49,8 +49,6 @@ import {
   requestHandler,
 } from "../utils";
 
-const CONNECTED_EVENT = "connected";
-const DISCONNECT_EVENT = "disconnect";
 const JOIN_CHAT_EVENT = "joinChat";
 const NEW_CHAT_EVENT = "newChat";
 const TYPING_EVENT = "typing";
@@ -66,7 +64,7 @@ const MESSAGE_REACTION_EVENT = "messageReacted";
 // Widths the resizable sidebar is held between. The conversation keeps at least
 // CHAT_MIN_WIDTH, which is what stops the header's call buttons from being
 // squeezed off the right edge when the sidebar is dragged wide.
-const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_MIN_WIDTH = 360;
 const CHAT_MIN_WIDTH = 320;
 
 /** Widest the sidebar may get, leaving CHAT_MIN_WIDTH for the conversation. */
@@ -108,8 +106,9 @@ const ChatPage = () => {
   // stable even if the user navigates to a different chat during the call.
   const callPeerIdRef = useRef<string | null>(null);
 
-  // Define state variables and their initial values using 'useState'
-  const [isConnected, setIsConnected] = useState(false); // For tracking socket connection
+  // Socket connection state comes from the context (single source of truth);
+  // a local duplicate here caused the "need to refresh once" race because the
+  // page never got its connect event even when the shared socket was connected.
 
   const [openAddChat, setOpenAddChat] = useState(false); // To control the 'Add Chat' modal
   const [loadingChats, setLoadingChats] = useState(false); // To indicate loading of chats
@@ -235,19 +234,27 @@ const ChatPage = () => {
 
   // Function to send a chat message
   const sendChatMessage = async () => {
-    // If no current chat ID exists or there's no socket connection, exit the function
-    if (!currentChat.current?._id || !socket || !isConnected) return;
-
+    // Only a missing chat stops the send. The message itself travels over HTTP
+    // (`sendMessage` below), so gating it on the socket meant a not-yet-handshaken
+    // socket silently swallowed the first message after landing on /chat — the
+    // "refresh once and it works" bug. The socket is only used for the
+    // best-effort typing hints, so a disconnected one must not block sending.
     const chatId = currentChat.current?._id;
+    if (!chatId) return;
+
     const rawMessage = message;
     const rawFiles = attachedFiles;
     if (!rawMessage.trim() && rawFiles.length === 0) return;
 
-    // Emit a STOP_TYPING_EVENT to inform other users/participants that typing has stopped
-    socket.emit(STOP_TYPING_EVENT, {
-      chatId,
-      sender: { _id: user?._id, username: user?.username },
-    });
+    // Emit a STOP_TYPING_EVENT to inform other users/participants that typing
+    // has stopped. Best-effort: a peer that misses this hint just sees the
+    // typing indicator time out on its own, which it already handles.
+    if (socket?.connected) {
+      socket.emit(STOP_TYPING_EVENT, {
+        chatId,
+        sender: { _id: user?._id, username: user?.username },
+      });
+    }
 
     // Optimistically show a WhatsApp-style pending bubble so the user knows the
     // message is in transit and can keep typing/sending.
@@ -385,14 +392,6 @@ const ChatPage = () => {
       // Reset the user's typing state
       setSelfTyping(false);
     }, timerLength);
-  };
-
-  const onConnect = () => {
-    setIsConnected(true);
-  };
-
-  const onDisconnect = () => {
-    setIsConnected(false);
   };
 
   /**
@@ -722,17 +721,15 @@ const ChatPage = () => {
 
     // Make sure we're actually connected. The socket is created eagerly by
     // SocketContext, but the handshake is still async — kick it if it hasn't
-    // completed yet. No user-facing noise: `isConnected` from the context is
-    // what gates anything that needs a live connection.
+    // completed yet. No user-facing noise: nothing on this page is gated on a
+    // live socket, so sending works even while the handshake is still in flight.
     if (!socket.connected) {
       socket.connect();
     }
 
     // Set up event listeners for various socket events:
     // Listener for when the socket connects.
-    socket.on(CONNECTED_EVENT, onConnect);
     // Listener for when the socket disconnects.
-    socket.on(DISCONNECT_EVENT, onDisconnect);
     // Listener for when a user is typing.
     socket.on(TYPING_EVENT, handleOnSocketTyping);
     // Listener for when a user stops typing.
@@ -752,8 +749,6 @@ const ChatPage = () => {
     // When the component using this hook unmounts or if `socket` or `chats` change:
     return () => {
       // Remove all the event listeners we set up to avoid memory leaks and unintended behaviors.
-      socket.off(CONNECTED_EVENT, onConnect);
-      socket.off(DISCONNECT_EVENT, onDisconnect);
       socket.off(TYPING_EVENT, handleOnSocketTyping);
       socket.off(STOP_TYPING_EVENT, handleOnSocketStopTyping);
       socket.off(MESSAGE_RECEIVED_EVENT, onMessageReceived);
@@ -772,11 +767,6 @@ const ChatPage = () => {
     // So, even if some socket callbacks are updating the `chats` state, it's not
     // updating on each `useEffect` call but on each socket call.
   }, [socket, chats]);
-
-  // Metadata for the current chat (used to display the remote user in the call UI)
-  const currentChatMetadata = currentChat.current
-    ? getChatObjectMetadata(currentChat.current, user!)
-    : null;
 
   // Find the remote user's ID from the current chat participants.
   // Also consider incomingCall.from for when the user receives a call while
@@ -812,6 +802,27 @@ const ChatPage = () => {
         c.participants.some((p) => p._id === remoteUserId),
     );
     return sharedChat?._id ?? currentChat.current?._id;
+  })();
+
+  /**
+   * Who the person on the other end of the call actually is.
+   *
+   * Deliberately NOT `getChatObjectMetadata(currentChat.current, user)`, which
+   * is what this used to pass. That describes the conversation the user is
+   * currently *reading*, and during a call the two are independent — you can
+   * carry on chatting with someone else while still talking to the person you
+   * called. Reading the visible chat meant that opening any other conversation
+   * silently relabelled the call panel with that person's name and face while
+   * the audio and video kept coming from the original peer: the call stayed
+   * connected and correctly targeted, but the UI named someone who was not on
+   * it.
+   *
+   * Resolved through `callChatId`, which `callPeerIdRef` pins to the peer for
+   * the whole duration of the call, so this is stable across navigation.
+   */
+  const callChatMetadata = (() => {
+    const callChat = chats.find((c) => c._id === callChatId);
+    return user && callChat ? getChatObjectMetadata(callChat, user) : null;
   })();
 
   // Active chat's typing users
@@ -854,14 +865,29 @@ const ChatPage = () => {
   };
 
   // Resizable sidebar: width in px (defaults to ~1/3 of the viewport).
-  const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
-    typeof window !== "undefined"
-      ? Math.min(
-          Math.round(window.innerWidth / 3),
-          Math.max(SIDEBAR_MIN_WIDTH, window.innerWidth - CHAT_MIN_WIDTH),
-        )
-      : 420,
-  );
+  //
+  // Clamped at BOTH ends. The old expression was
+  //   Math.min(Math.round(innerWidth / 3), Math.max(SIDEBAR_MIN_WIDTH, ...))
+  // which reads as if the minimum were being honoured, but it isn't: the
+  // Math.max(SIDEBAR_MIN_WIDTH, ...) is the *upper* bound that the outer
+  // Math.min clamps against, so the expression had no floor whatsoever. On any
+  // window narrower than 3 x SIDEBAR_MIN_WIDTH the third-of-the-viewport default
+  // came out under the minimum — measured 300px at a 900px window, 320px at
+  // 960px, 341px at 1024px — and the other two width sources were fine, which
+  // is why it looked intermittent: dragging clamps with
+  // Math.max(..., SIDEBAR_MIN_WIDTH) and the resize handler only ever shrinks an
+  // already-legal value.
+  //
+  // Nothing is persisted, so every reload recomputed that same too-small default
+  // and silently undid the minimum. Raise the minimum and the symptom is a
+  // refresh, which is exactly what was reported.
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return SIDEBAR_MIN_WIDTH;
+    return Math.min(
+      Math.max(Math.round(window.innerWidth / 3), SIDEBAR_MIN_WIDTH),
+      maxSidebarWidth(),
+    );
+  });
 
   // Narrowing the window has to pull the sidebar in with it. It's a fixed pixel
   // width with flex-shrink-0, so without this it keeps the width it had at the
@@ -1254,8 +1280,8 @@ const ChatPage = () => {
               <div className="contents sm:block sm:relative sm:h-0 sm:w-full sm:flex-shrink-0">
                 <CallModal
                   chatId={callChatId}
-                  remoteAvatar={currentChatMetadata?.avatar}
-                  remoteName={currentChatMetadata?.title}
+                  remoteAvatar={callChatMetadata?.avatar}
+                  remoteName={callChatMetadata?.title}
                   localAvatar={user?.avatar}
                 />
               </div>

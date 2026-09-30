@@ -49,7 +49,22 @@ const OtpInput: React.FC<OtpInputProps> = ({
 
     // A paste (or a fast multi-char input) lands several digits at once.
     if (digits.length > 1) {
-      const merged = (value + digits).slice(0, length);
+      /*
+       * A paste that fills every box is unambiguously the whole code, so it
+       * REPLACES what is there rather than being appended to it.
+       *
+       * Appending is right for a partial paste into a later box, and wrong for
+       * a full one. Correcting a typo by pasting the right code into a
+       * half-filled field interleaved the two: with "8" already in the first
+       * box, pasting "999001" produced "899900" — a code the user never typed,
+       * which then failed as "that code isn't right" while the inbox held the
+       * one they were looking at.
+       */
+      const merged =
+        digits.length >= length
+          ? digits.slice(0, length)
+          : (value + digits).slice(0, length);
+
       onChange(merged);
       const next = Math.min(merged.length, length - 1);
       refs.current[next]?.focus();
