@@ -64,7 +64,7 @@ const MESSAGE_REACTION_EVENT = "messageReacted";
 // Widths the resizable sidebar is held between. The conversation keeps at least
 // CHAT_MIN_WIDTH, which is what stops the header's call buttons from being
 // squeezed off the right edge when the sidebar is dragged wide.
-const SIDEBAR_MIN_WIDTH = 240;
+const SIDEBAR_MIN_WIDTH = 360;
 const CHAT_MIN_WIDTH = 320;
 
 /** Widest the sidebar may get, leaving CHAT_MIN_WIDTH for the conversation. */
