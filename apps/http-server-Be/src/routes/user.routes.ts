@@ -1,5 +1,9 @@
 import express, { Router } from "express";
 import { verifyJWT } from "../middlewares/auth.middleware.js";
+import {
+    authAccountLimiter,
+    authIpLimiter,
+} from "../middlewares/rateLimit.middleware.js";
 import { upload } from "../middlewares/multer.middleware.js";
 import {
     registerUser,
@@ -25,6 +29,7 @@ const router: Router = express.Router();
 
 // Public routes
 router.route("/register").post(
+    authIpLimiter,
     //injecting middleware!! for file handling
     upload.fields([
         {
@@ -34,19 +39,25 @@ router.route("/register").post(
     ]),
     registerUser,
 );
-router.route("/login").post(loginUser);
+// Login gets both limiters: the per-account one bounds failures against a
+// single identifier, the per-IP one bounds spraying many identifiers. Register,
+// verification and recovery are public by necessity, so they get the per-IP
+// cap only — an account cannot exist yet, and the emailed code is the real
+// credential on those paths (they already have their own attempt lockout).
+router.route("/login").post(authIpLimiter, authAccountLimiter, loginUser);
 // Email verification — unauthenticated, because the user has no tokens yet.
 // The emailed code IS the credential here.
-router.route("/verify-email").post(verifyEmail);
-router.route("/resend-verification").post(resendVerificationCode);
+router.route("/verify-email").post(authIpLimiter, verifyEmail);
+router.route("/resend-verification").post(authIpLimiter, resendVerificationCode);
 // Account recovery — also unauthenticated, for the same reason: the caller has
 // no tokens, and the emailed code is the credential. Unlike /register, nothing
 // on the account changes until that code comes back.
 //
 // `complete` takes multipart because it can carry a new picture. The picture
 // is optional; the text fields alone are enough to change a password.
-router.route("/recover-account").post(requestAccountRecovery);
+router.route("/recover-account").post(authIpLimiter, requestAccountRecovery);
 router.route("/recover-account/complete").post(
+    authIpLimiter,
     upload.fields([
         {
             name: "avatar",
@@ -55,7 +66,7 @@ router.route("/recover-account/complete").post(
     ]),
     completeAccountRecovery,
 );
-router.route("/refresh-token").post(refreshAccessToken);
+router.route("/refresh-token").post(authIpLimiter, authAccountLimiter, refreshAccessToken);
 router.route("/get-any-user-friend-list/c/:username").get(getAnyUserFriendList);
 router.route("/c/:username").get(getUserProfile);
 
