@@ -12,8 +12,12 @@ export default defineConfig(({ mode }) => {
    * `import.meta.env`, but only `VITE_`-prefixed keys reach the client bundle.
    * The Sentry *upload* keys are not `VITE_`-prefixed on purpose — `SENTRY_AUTH_TOKEN`
    * is a write-capable credential and must never be inlined into browser JavaScript.
+   *
+   * The prefix list has to include `VITE_` as well as `SENTRY_`. Reading only
+   * `SENTRY_` does NOT surface `VITE_SENTRY_DSN` under any name, and that DSN is
+   * the one signal used below to decide whether upload is possible.
    */
-  const env = loadEnv(mode, __dirname, "SENTRY_");
+  const env = loadEnv(mode, __dirname, ["SENTRY_", "VITE_"]);
 
   /*
    * The plugin's two jobs are unrelated and both optional, which is why it is
@@ -29,10 +33,29 @@ export default defineConfig(({ mode }) => {
    * Upload is skipped unless there is something to upload with: no DSN means no
    * project, and no auth token means a read-only token that would fail the build.
    * A contributor with a plain `.env` still gets a working local build.
+   *
+   * Note the DSN is read as `VITE_SENTRY_DSN`, not `SENTRY_DSN`. This is a real
+   * trap: `loadEnv(..., "SENTRY_")` filters to keys starting with that prefix, so
+   * `VITE_SENTRY_DSN` is NOT returned under either of those two names. Checking
+   * `env.SENTRY_DSN` here always resolved to `undefined`, which silently disabled
+   * upload on every build — the frontend looked configured and uploaded nothing.
+   * The `VITE_` name is the correct one to check, since that is the key the
+   * runtime actually reads and therefore the key that proves a DSN exists.
    */
   const canUpload = Boolean(
-    env.SENTRY_DSN && env.SENTRY_AUTH_TOKEN && env.SENTRY_ORG && env.SENTRY_PROJECT,
+    (env.VITE_SENTRY_DSN || env.SENTRY_DSN) &&
+      env.SENTRY_AUTH_TOKEN &&
+      env.SENTRY_ORG &&
+      env.SENTRY_PROJECT,
   );
+
+  if (!canUpload && env.VITE_SENTRY_DSN) {
+    console.warn(
+      "[sentry] VITE_SENTRY_DSN is set but SENTRY_ORG / SENTRY_PROJECT / " +
+        "SENTRY_AUTH_TOKEN are not — source maps will be built but NOT uploaded, " +
+        "so production stack traces will stay minified.",
+    );
+  }
 
   return {
     server: {
@@ -77,7 +100,15 @@ export default defineConfig(({ mode }) => {
          * for everyone who clones the repo.
          */
         sourcemaps: {
-          assets: canUpload ? "./dist" : undefined,
+          /*
+           * `assets` is deliberately NOT set. The plugin defaults it to the build
+           * output directory, which is correct here, and passing an explicit
+           * `"./dist"` made it print "Didn't find any matching sources for debug
+           * ID upload" and upload nothing — the value is treated as a glob
+           * pattern, and a bare directory path does not match its own contents.
+           * Defaulting also means the config keeps working if `build.outDir`
+           * ever changes.
+           */
           disable: !canUpload,
         },
       }),
