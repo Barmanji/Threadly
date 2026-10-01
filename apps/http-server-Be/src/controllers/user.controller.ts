@@ -745,6 +745,12 @@ const changeCurrentPassword: RequestHandler = asyncHandler(
     }
 
     user!.password = newPassword;
+    // Changing the password invalidates all existing sessions, so clear the
+    // stored refresh token. Otherwise an old session's refresh token stays
+    // valid and can keep minting new access tokens against a password that was
+    // just rotated. Empty string, not $unset, to match how the recovery flow
+    // clears it and to stay within the field's declared `string` type.
+    user!.refreshToken = "";
     await user!.save({ validateBeforeSave: false });
 
     return res
