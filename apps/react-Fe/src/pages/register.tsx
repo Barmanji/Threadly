@@ -606,21 +606,6 @@ const Register = () => {
 
           <FieldError message={codeError} />
 
-          {attemptsLeft !== null ? (
-            <p
-              className={
-                attemptsLeft > 0
-                  ? "text-center text-xs font-bold text-ink"
-                  : "text-center text-xs font-extrabold text-retro-red"
-              }
-              role="status"
-            >
-              {attemptsLeft > 0
-                ? `${attemptsLeft} of ${maxAttempts} attempts left.`
-                : "You've used all your attempts. Request a new code below."}
-            </p>
-          ) : null}
-
           <Button
             fullWidth
             disabled={isAuthPending || code.length !== 6}
