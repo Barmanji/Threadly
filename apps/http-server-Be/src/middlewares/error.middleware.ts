@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import multer from "multer";
 
 import logger from "../logger/winston.logger.js";
 import { ApiError, type ApiFieldError } from "../utils/ApiError.js";
@@ -64,15 +65,67 @@ const extractDuplicateKeyInfo = (err: unknown): { field: string; value: string }
   return { field, value: String(keyValue[field]) };
 };
 
+/**
+ * Translate a multer rejection into an ApiError.
+ *
+ * multer signals "too big" / "too many" / "wrong type" by throwing a
+ * `MulterError`, which is not a mongoose error, so it used to fall through to
+ * the generic branch and become a 500 with either a raw multer message in
+ * development or a useless "something went wrong" in production. Every one of
+ * these is the client's fault and deserves a 4xx that says what to change.
+ */
+const describeMulterError = (err: unknown): ApiError | null => {
+  if (!err || typeof err !== "object") return null;
+  if (!(err instanceof multer.MulterError)) return null;
+
+  const mb = (bytes: number) => `${Math.round(bytes / (1024 * 1024))}MB`;
+
+  switch (err.code) {
+    case "LIMIT_FILE_SIZE":
+      // `limit` is set by multer at runtime but is not on the published type.
+      return new ApiError(
+        413,
+        `That file is too large. The maximum is ${mb(Number((err as unknown as { limit?: number }).limit))} per file.`,
+        [{ path: err.field ?? "file", message: "File too large" }],
+        "VALIDATION_ERROR",
+      );
+    case "LIMIT_FILE_COUNT":
+    case "LIMIT_UNEXPECTED_FILE":
+      return new ApiError(
+        400,
+        "That file cannot be uploaded here. Check the file type and how many files you are sending.",
+        [{ path: err.field ?? "file", message: "File not accepted" }],
+        "VALIDATION_ERROR",
+      );
+    case "LIMIT_PART_COUNT":
+      return new ApiError(
+        400,
+        "Too many parts in that upload.",
+        undefined,
+        "VALIDATION_ERROR",
+      );
+    default:
+      return new ApiError(
+        400,
+        "That upload could not be accepted.",
+        undefined,
+        "VALIDATION_ERROR",
+      );
+  }
+};
+
 const errorHandler = (err: unknown, req: Request, res: Response, next: NextFunction) => {
   let apiError: ApiError;
 
   if (err instanceof ApiError) {
     apiError = err;
   } else {
+    const multerError = describeMulterError(err);
     // Duplicate username/email — a conflict, not a server fault.
-    const duplicate = extractDuplicateKeyInfo(err);
-    if (duplicate) {
+    const duplicate = multerError ? null : extractDuplicateKeyInfo(err);
+    if (multerError) {
+      apiError = multerError;
+    } else if (duplicate) {
       const label = duplicate.field === "email" ? "email address" : "username";
       apiError = new ApiError(
         409,

@@ -4,7 +4,7 @@ import {
     authAccountLimiter,
     authIpLimiter,
 } from "../middlewares/rateLimit.middleware.js";
-import { upload } from "../middlewares/multer.middleware.js";
+import { uploadAvatar } from "../middlewares/multer.middleware.js";
 import {
     registerUser,
     verifyEmail,
@@ -31,7 +31,7 @@ const router: Router = express.Router();
 router.route("/register").post(
     authIpLimiter,
     //injecting middleware!! for file handling
-    upload.fields([
+    uploadAvatar.fields([
         {
             name: "avatar",
             maxCount: 1,
@@ -58,7 +58,7 @@ router.route("/resend-verification").post(authIpLimiter, resendVerificationCode)
 router.route("/recover-account").post(authIpLimiter, requestAccountRecovery);
 router.route("/recover-account/complete").post(
     authIpLimiter,
-    upload.fields([
+    uploadAvatar.fields([
         {
             name: "avatar",
             maxCount: 1,
@@ -79,7 +79,7 @@ router.route("/change-password").put(changeCurrentPassword);
 router.route("/update-account").put(updateAccountDetails);
 router
     .route("/update-profile-picture")
-    .put(upload.single("profilePicture"), updateUserProfilePicture);
+    .put(uploadAvatar.single("profilePicture"), updateUserProfilePicture);
 router.route("/update-bio").put(updateUserBio);
 router.route("/get-my-friend-list").get(getMyFriendsList);
 router.route("/get-all-users").get(getAllUsers);

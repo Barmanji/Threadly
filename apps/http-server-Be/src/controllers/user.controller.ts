@@ -864,7 +864,15 @@ const getAnyUserFriendList: RequestHandler = asyncHandler(
       throw new ApiError(400, "Username is required");
     }
     if (typeof username === "string") {
-      const user = await User.findOne({ username: username.toLowerCase() });
+      // Also public, so it also gets a projection rather than a bare findOne.
+      // The response only carries `friends`, so nothing sensitive was leaking
+      // here today, but `friends` is a list of user ids and that is a social
+      // graph anyone on the internet can enumerate by username. The explicit
+      // select also means a future change that returns the user document cannot
+      // accidentally start serving the password hash or email that a bare
+      // findOne would hand back.
+      const user = await User.findOne({ username: username.toLowerCase() })
+        .select("-__v -password -refreshToken -email -emailVerification");
       if (!user) {
         throw new ApiError(404, "User not found");
       }
@@ -886,7 +894,22 @@ const getUserProfile: RequestHandler = asyncHandler(
     }
     const user = await User.findOne({
       username: username.toLowerCase(),
-    }).select("-__v -password -refreshToken");
+      // This route sits above `router.use(verifyJWT)`, so it is reachable with
+      // no token at all and a username is enough to reach it. Projecting out
+      // `-__v -password -refreshToken` still shipped `email`, and also the
+      // transient `emailVerification` sub-document (a bcrypt hash of the
+      // account's current verification code) whenever one was outstanding.
+      // Both are excluded now, leaving only what a public profile needs.
+      //
+      // The projection is the fix rather than moving the route behind
+      // `verifyJWT`: nothing in the frontend calls this endpoint at all, but a
+      // profile that never needs an address should not be able to serve one
+      // regardless of who is asking. Neither the response shape the UI depends
+      // on nor any existing client is affected by hiding these fields.
+    })
+      .select(
+        "-__v -password -refreshToken -email -emailVerification -status",
+      );
 
     if (!user) {
       throw new ApiError(404, "User not found");
