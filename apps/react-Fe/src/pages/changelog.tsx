@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { ArrowLeftIcon } from "@heroicons/react/20/solid";
 import { useAuth } from "../context/AuthContext";
 import ThemeToggle from "../components/ThemeToggle";
+import BuyMeACoffeeLink from "../components/BuyMeACoffeeLink";
 
 /**
  * One themed group of changes. `ref` is the commit that introduced it, shown as
@@ -280,8 +281,13 @@ const Changelog: React.FC = () => {
       {/* Same `absolute right-4 top-4 z-20 flex items-center gap-3` row the hero,
           login and register use, so the toggle lands in the identical spot on
           every page. No ChangelogLink beside it here — this IS the changelog,
-          and a link to yourself is noise. */}
+          and a link to yourself is noise.
+
+          The support link lives here and nowhere else: the changelog is where
+          someone who just read what shipped is most likely to be feeling
+          generous, so that is the one page that has to ask. */}
       <div className="absolute right-4 top-4 z-20 flex items-center gap-3">
+        <BuyMeACoffeeLink />
         <ThemeToggle />
       </div>
 
