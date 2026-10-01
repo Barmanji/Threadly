@@ -5,6 +5,7 @@ import { IUser, User } from "../models/user/user.model.js";
 import { Chat } from "../models/chat/chat.model.js";
 import { ChatMessage } from "../models/chat/message.model.js";
 import { emitSocketEvent } from "../socket/socket.js";
+import { invalidateChatAccess } from "../socket/chatAccess.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -222,6 +223,10 @@ const createOrGetAOneOnOneChat: RequestHandler = asyncHandler(
       ], // add receiver and logged in user as participants
       admin: (req.user as IUserWithId)._id,
     });
+    // Nothing can have cached this chat yet, but invalidating keeps every
+    // membership change going through the same call, so a future reader cannot
+    // assume "new chat" needs no invalidation.
+    invalidateChatAccess(newChatInstance._id.toString());
 
     // structure the chat as per the common aggregation to keep the consistency
     const createdChat = await Chat.aggregate([
@@ -297,6 +302,7 @@ const createAGroupChat: RequestHandler = asyncHandler(
       participants: members,
       admin: (req.user as IUserWithId)._id,
     });
+    invalidateChatAccess(groupChat._id.toString());
 
     // structure the chat
     const chat = await Chat.aggregate([
@@ -473,6 +479,9 @@ const deleteGroupChat: RequestHandler = asyncHandler(
     }
 
     await Chat.findByIdAndDelete(chatId);
+    // The chat no longer exists, so drop the cached member list rather than
+    // letting a socket keep treating it as a room it may join for up to the TTL.
+    invalidateChatAccess(chatId);
 
     await deleteCascadeChatMessages(chatId); // remove all messages and attachments associated with the chat
 
@@ -537,6 +546,7 @@ const deleteOneOnOneChat: RequestHandler = asyncHandler(
     }
 
     await Chat.findByIdAndDelete(chatId); // delete the chat even if user is not admin because it's a personal chat
+    invalidateChatAccess(chatId as string);
 
     await deleteCascadeChatMessages(chatId as string); // delete all the messages and attachments associated with the chat
 
@@ -599,6 +609,10 @@ const leaveGroupChat: RequestHandler = asyncHandler(
       },
       { new: true },
     );
+    // Invalidate rather than wait out the cache TTL: a user who just left must
+    // stop being able to relay into the room immediately, otherwise they keep
+    // whiteboard and typing access for up to 30 seconds after leaving.
+    invalidateChatAccess(chatId as string);
 
     const chat = await Chat.aggregate([
       {
@@ -669,6 +683,9 @@ const addNewParticipantInGroupChat: RequestHandler = asyncHandler(
       },
       { new: true },
     );
+    // A newly added member must be able to join the room right away rather than
+    // being refused until the cache expires.
+    invalidateChatAccess(chatId as string);
 
     const chat = await Chat.aggregate([
       {
@@ -742,6 +759,9 @@ const removeParticipantFromGroupChat: RequestHandler = asyncHandler(
       },
       { new: true },
     );
+    // Removal must take effect at once; a removed member keeps relaying to the
+    // room until the TTL expires otherwise.
+    invalidateChatAccess(chatId as string);
 
     const chat = await Chat.aggregate([
       {
