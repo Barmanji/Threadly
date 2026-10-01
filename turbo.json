@@ -10,12 +10,25 @@
         },
         "http-server-be#build": {
             "dependsOn": ["^build"],
+            "env": ["SENTRY_DSN", "SENTRY_RELEASE", "SENTRY_TRACES_SAMPLE_RATE"],
             "inputs": ["$TURBO_DEFAULT$", ".env*"],
             "outputs": ["dist/**"]
         },
         "react-fe#build": {
             "dependsOn": ["^build"],
-            "env": ["VITE_SERVER_URI", "VITE_SOCKET_URI", "VITE_MEDIASOUP_URL"],
+            "env": [
+                "VITE_SERVER_URI",
+                "VITE_SOCKET_URI",
+                "VITE_MEDIASOUP_URL",
+                "VITE_SENTRY_DSN",
+                "VITE_SENTRY_RELEASE",
+                "VITE_SENTRY_TRACES_SAMPLE_RATE",
+                "VITE_SENTRY_PROFILES_SAMPLE_RATE",
+                "VITE_SENTRY_REPLAYS_SESSION_SAMPLE_RATE",
+                "VITE_SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE",
+                "VITE_SENTRY_REPLAY_MASK_ALL_TEXT",
+                "VITE_SENTRY_REPLAY_BLOCK_ALL_MEDIA"
+            ],
             "inputs": ["$TURBO_DEFAULT$", ".env*"],
             "outputs": ["dist/**"]
         },

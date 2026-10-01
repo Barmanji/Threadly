@@ -8,8 +8,53 @@ import type { ChatListItemInterface, ChatMessageInterface } from "../interfaces/
 import type { CompleteRecoveryResultData, FreeAPISuccessResponseInterface, LoginResponseData, RecoveryCodeResultData, RegisterResultData, ResendCodeResultData, VerifyEmailResultData } from "../interfaces/api";
 import type { UserInterface } from "../interfaces/user";
 import { LocalStorage } from "../utils";
+import * as Sentry from "@sentry/react";
 
 type ApiResponse<T> = AxiosResponse<FreeAPISuccessResponseInterface<T>>;
+
+/**
+ * Report an API failure that the UI already handles gracefully.
+ *
+ * Deliberately a `captureMessage`, not a `captureException`: a 401 on an expired
+ * token or a 409 on a taken username is a normal, expected outcome that the app
+ * recovers from and shows the user a message for. Capturing those as exceptions
+ * would bury the real bugs under thousands of "errors" that are just the app
+ * working.
+ *
+ * The line drawn is at 5xx and at transport-level failures: those mean the server
+ * broke or never answered, which is exactly what nobody notices until a user
+ * complains.
+ */
+const reportApiFailure = (error: unknown, phase: string) => {
+  const axiosError = error as AxiosError;
+  const status = axiosError.response?.status;
+
+  // No response at all: DNS failure, refused connection, CORS preflight rejection,
+  // or the 120s timeout. The user sees a spinner stop; nothing else records it.
+  if (!status) {
+    Sentry.captureMessage(`API request failed before a response (${phase})`, {
+      level: "error",
+      tags: { phase },
+      extra: {
+        url: axiosError.config?.url,
+        method: axiosError.config?.method,
+        timeout: axiosError.code,
+      },
+    });
+    return;
+  }
+
+  if (status < 500) return;
+
+  Sentry.captureMessage(`API ${status} from ${axiosError.config?.url} (${phase})`, {
+    level: "error",
+    tags: { phase, status: String(status) },
+    extra: {
+      method: axiosError.config?.method,
+      url: axiosError.config?.url,
+    },
+  });
+};
 
 // Create an Axios instance for API requests
 const apiClient = axios.create({
@@ -68,6 +113,7 @@ apiClient.interceptors.response.use(
 
         // Network errors or requests without a config are terminal
         if (!status || !originalRequest) {
+            reportApiFailure(error, "request");
             return Promise.reject(error);
         }
 
@@ -98,6 +144,14 @@ apiClient.interceptors.response.use(
                 originalRequest.headers.Authorization = `Bearer ${accessToken}`;
                 return apiClient(originalRequest);
             } catch (refreshError) {
+                /*
+                 * An expired refresh token is the normal end of a long-lived
+                 * session and produces a clean 401, which `reportApiFailure`
+                 * ignores. What it does catch is the refresh endpoint itself
+                 * being down or unreachable — which logs the user out for a
+                 * reason the UI cannot explain.
+                 */
+                reportApiFailure(refreshError, "token-refresh");
                 // Refresh token expired/consumed -> log out and go to login
                 handleUnauthorized();
                 return Promise.reject(refreshError);
@@ -107,6 +161,13 @@ apiClient.interceptors.response.use(
         // Another 401/403 (e.g. on the retried request) -> log out
         if (status === 401 || status === 403) {
             handleUnauthorized();
+        } else {
+            /*
+             * 5xx only, by the time we get here: the 4xx cases are all expected
+             * outcomes the UI turns into an inline field error, and reporting
+             * them would bury the genuine server faults.
+             */
+            reportApiFailure(error, "request");
         }
 
         return Promise.reject(error);

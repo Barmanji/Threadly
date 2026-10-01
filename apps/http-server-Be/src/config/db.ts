@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/node";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import { DB_NAME } from "../constants";
@@ -28,6 +29,15 @@ const connectDB = async () => {
         );
     } catch (error) {
         logger.error("MongoDB connection error: ", error);
+        /*
+         * `index.ts` captures this too, but that handler only wraps the call to
+         * `connectDB` and cannot tell a connection failure apart from any other
+         * startup error. Capturing here as well means the event is tagged with
+         * which dependency failed, which is the first thing worth knowing.
+         */
+        Sentry.captureException(error, {
+            tags: { phase: "startup", dependency: "mongodb" },
+        });
         process.exit(1);
     }
 };

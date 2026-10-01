@@ -5,13 +5,16 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc -b",
-    "start": "node dist/index.js",
-    "dev": "nodemon -r dotenv/config --watch src --ext ts,tsx --exec \"pnpm run build && node dist/index.js\"",
+    "start": "node --import ./dist/instrument.js dist/index.js",
+    "dev": "nodemon -r dotenv/config --watch src --ext ts,tsx --exec \"pnpm run build && node --import ./dist/instrument.js dist/index.js\"",
     "check-types": "tsc --noEmit",
-    "swagger": "node ./swagger.js"
+    "swagger": "node ./swagger.js",
+    "sentry-release": "sentry-cli releases new ${SENTRY_RELEASE:-$(git rev-parse --short HEAD)}",
+    "sentry-sourcemaps": "sentry-cli sourcemaps upload --release ${SENTRY_RELEASE:-$(git rev-parse --short HEAD)} ./dist"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
+    "@sentry/cli": "^2.58.6",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -26,6 +29,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@sentry/node": "^11.1.0",
     "@types/cookie": "^0.4.1",
     "@types/express-session": "^1.18.2",
     "@types/morgan": "^1.9.10",

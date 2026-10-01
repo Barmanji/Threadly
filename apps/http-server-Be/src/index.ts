@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import * as Sentry from "@sentry/node";
 import { httpServer } from "./app.js";
 import connectDB from "./config/db.js";
 import logger from "./logger/winston.logger.js";
@@ -25,6 +26,17 @@ const initializeServer = async () => {
     startServer();
   } catch (err) {
     logger.error("Mongo db connect error: ", err);
+    /*
+     * A database that will not connect is the single most important failure this
+     * process can have — the server listens and then 500s everything. Logging it
+     * is not enough, because `logger.error`'s winston output is a formatted
+     * string that goes to a file nobody reads in production. Capture it as a real
+     * event before giving up, so it pages whoever is watching Sentry.
+     */
+    Sentry.captureException(err, {
+      tags: { phase: "startup", dependency: "mongodb" },
+    });
+    process.exit(1);
   }
 };
 

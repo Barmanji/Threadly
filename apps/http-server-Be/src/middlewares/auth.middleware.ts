@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import * as Sentry from "@sentry/node";
 import { ApiError } from "../utils/ApiError";
 import { asyncHandler } from "../utils/asyncHandler";
 import jwt, { JwtPayload } from "jsonwebtoken";
@@ -56,6 +57,18 @@ export const verifyJWT: RequestHandler = asyncHandler(async (req: Request, res: 
         }
 
         req.user = user;
+        /*
+         * Attach the account to this request's Sentry scope, so any 500 later in
+         * the handler carries the user id. This is the only place in the request
+         * lifecycle that knows who the caller is — by the time `errorHandler`
+         * runs, that information is only reachable through the scope.
+         *
+         * The id is the Mongo `_id` and nothing else — no username, no email. A
+         * server-side event is far more likely to be read by someone with
+         * production access than a browser event is, so this stays stricter than
+         * the frontend's `id` + `username`.
+         */
+        Sentry.getCurrentScope().setUser({ id: user._id.toString() });
         next();
     } catch (error: unknown) {
         if (error instanceof ApiError) throw error;

@@ -1,5 +1,6 @@
 import cookie from "cookie";
 import jwt from "jsonwebtoken";
+import * as Sentry from "@sentry/node";
 import { createWorker, types as mediasoupTypes } from "mediasoup";
 import { Namespace, Server, Socket } from "socket.io";
 import { User, IUser } from "../models/user/user.model.js";
@@ -60,7 +61,20 @@ const initMediasoupWorker = async (): Promise<mediasoupTypes.Worker> => {
   });
 
   worker.on("died", () => {
+    /*
+     * A dead worker takes down every group call on this process — the mediasoup
+     * Rust worker is a child process, so Sentry cannot instrument it and this
+     * handler is the ONLY place the failure is observable.
+     *
+     * The `died` event carries no reason, so the message says exactly what is
+     * known: that it died, not why. Guessing at a cause here would be worse than
+     * an honest "unknown".
+     */
     console.error("Mediasoup worker died");
+    Sentry.captureMessage("Mediasoup worker died — all group calls on this process are down", {
+      level: "fatal",
+      tags: { subsystem: "mediasoup" },
+    });
     worker = null;
   });
 
@@ -412,12 +426,44 @@ const authenticateSocket = async (socket: MediasoupSocket): Promise<void> => {
 export const setupMediasoup = (io: Server): void => {
   mediasoupServer = io.of("/mediasoup");
 
+  /*
+   * Every handler below follows the same shape: `catch`, log to console, answer
+   * the client with `{ success: false }`. That per-handler try/catch is why none
+   * of these failures reach the Express error handler — socket.io never sees an
+   * unhandled rejection — and why they are invisible in production today, where
+   * `console.error` goes to stdout that nobody tails.
+   *
+   * This helper keeps that reporting in one place instead of repeating
+   * `captureException` six times, and it applies the same filter as the auth
+   * middleware: an `ApiError` we threw deliberately is a client mistake (a missing
+   * `roomId`, a transport that has already expired) and is answered normally;
+   * anything else is a real fault.
+   */
+  const reportHandlerError = (error: unknown, event: string): void => {
+    if (error instanceof ApiError) return;
+
+    Sentry.captureException(error, {
+      tags: { subsystem: "mediasoup", event },
+    });
+  };
+
   mediasoupServer.use(async (socket, next) => {
     try {
       await authenticateSocket(socket as MediasoupSocket);
       next();
     } catch (error: unknown) {
       console.error("Mediasoup auth error:", (error as Error)?.message);
+      /*
+       * A rejected handshake is usually a legitimately expired token, which is
+       * the client's problem to resolve by refreshing — not a server fault.
+       * Only a failure that is NOT an `ApiError` is worth an event: it means the
+       * lookup or the JWT verify itself broke.
+       */
+      if (!(error instanceof ApiError)) {
+        Sentry.captureException(error, {
+          tags: { subsystem: "mediasoup", event: "auth" },
+        });
+      }
       next(
         error instanceof Error
           ? error
@@ -437,6 +483,7 @@ export const setupMediasoup = (io: Server): void => {
         callback(result);
       } catch (error) {
         console.error("Error joining room:", error);
+        reportHandlerError(error, "join-room");
         callback({
           success: false,
           error: String((error as Error)?.message || error),
@@ -450,6 +497,7 @@ export const setupMediasoup = (io: Server): void => {
         callback({ success: true, ...transportToClient(transport) });
       } catch (error) {
         console.error("Error creating transport:", error);
+        reportHandlerError(error, "create-transport");
         callback({
           success: false,
           error: String((error as Error)?.message || error),
@@ -465,6 +513,7 @@ export const setupMediasoup = (io: Server): void => {
           callback({ success: true });
         } catch (error) {
           console.error("Error connecting transport:", error);
+          reportHandlerError(error, "connect-transport");
           callback({
             success: false,
             error: String((error as Error)?.message || error),
@@ -497,6 +546,7 @@ export const setupMediasoup = (io: Server): void => {
           callback({ success: true, producerId: producer.id });
         } catch (error) {
           console.error("Error producing:", error);
+          reportHandlerError(error, "produce");
           callback({
             success: false,
             error: String((error as Error)?.message || error),
@@ -525,6 +575,7 @@ export const setupMediasoup = (io: Server): void => {
           });
         } catch (error) {
           console.error("Error consuming:", error);
+          reportHandlerError(error, "consume");
           callback({
             success: false,
             error: String((error as Error)?.message || error),

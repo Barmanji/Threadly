@@ -78,6 +78,7 @@ app.use(express.static("public")); // configure static file to save images local
 app.use(cookieParser());
 
 app.use(morganMiddleware);
+
 initializeSocketIO(io);
 setupMediasoup(io);
 

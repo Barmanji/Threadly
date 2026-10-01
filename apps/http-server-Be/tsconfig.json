@@ -2,6 +2,21 @@
     "extends": "@repo/typescript-config/base.json",
     "compilerOptions": {
         "rootDir": "./src",
-        "outDir": "./dist"
+        "outDir": "./dist",
+        /*
+         * Emit `.js.map` alongside the compiled output.
+         *
+         * This was OFF, which meant `dist/` shipped no mapping back to the
+         * TypeScript source — so every production stack trace Sentry receives
+         * points at offsets inside `dist/*.js` with no file, line or column that
+         * means anything.
+         *
+         * `inlineSources` embeds the original `.ts` content in the map, so the
+         * uploaded artifact resolves to readable source even when the `.ts` files
+         * are not deployed next to `dist/`. Unrelated to `declarationMap`, which
+         * was already on.
+         */
+        "sourceMap": true,
+        "inlineSources": true
     }
 }

@@ -1,5 +1,6 @@
 import cookie from "cookie";
 import jwt from "jsonwebtoken";
+import * as Sentry from "@sentry/node";
 import { Server, Socket } from "socket.io";
 import { ChatEventEnum } from "../constants.js";
 import { User, IUser } from "../models/user/user.model.js";
@@ -173,6 +174,20 @@ const guardRoom = (
         error instanceof Error ? error.message : "unknown error"
       }`,
     );
+    /*
+     * This catch is the only thing standing between a throwing socket handler and
+     * an unhandled rejection that kills the process, so it is also the only place
+     * the failure is visible at all. `logger.error` alone is not enough: winston's
+     * level is `warn` in production, so the formatted string it writes has the
+     * stack discarded and goes to a log file nobody tails.
+     *
+     * The `label` is included as a tag so every occurrence of one handler failing
+     * groups into a single issue instead of one issue per call site.
+     */
+    Sentry.captureException(error, {
+      tags: { subsystem: "socket", event: label },
+      extra: { userId: socket.user?._id?.toString(), chatId: String(chatId) },
+    });
   });
 };
 

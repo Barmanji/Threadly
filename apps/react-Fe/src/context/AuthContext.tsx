@@ -20,6 +20,19 @@ import type {
   VerifyEmailResultData,
 } from "../interfaces/api";
 import { LocalStorage, requestHandler, type ApiFailure } from "../utils";
+import * as Sentry from "@sentry/react";
+
+/**
+ * Point every subsequent Sentry event at this account.
+ *
+ * `id` and `username` only — the email is deliberately left out. `sendDefaultPii`
+ * stays false in the Sentry config, so nothing is attached implicitly; this is
+ * the only place identity enters an event, and it is two fields. Add
+ * `email:` here if you decide email-in-Sentry is worth it for support triage.
+ */
+const identifySentryUser = (user: UserInterface | null) => {
+  Sentry.setUser(user?._id ? { id: user._id, username: user.username } : null);
+};
 
 /** What `register` resolves to so the page can move to the verify step. */
 export type RegisterOutcome =
@@ -96,6 +109,7 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
         const { data } = res;
         setUser(data.findUser);
         setToken(data.accessToken);
+        identifySentryUser(data.findUser);
         LocalStorage.set("user", data.findUser);
         LocalStorage.set("token", data.accessToken);
         if (data.refreshToken) {
@@ -221,6 +235,12 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       () => {
         setUser(null);
         setToken(null);
+        /*
+         * Without this the signed-out session keeps reporting as the user who
+         * just logged out, and the next person to use the browser attaches
+         * their bugs to somebody else's account.
+         */
+        identifySentryUser(null);
         LocalStorage.clear();
         navigate("/login");
       },
@@ -234,6 +254,12 @@ const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => 
     if (_token && _user?._id) {
       setUser(_user);
       setToken(_token);
+      /*
+       * Re-establish identity on a page reload. `Sentry.init` runs fresh every
+       * load and starts with no user, so a crash on the first render of a
+       * restored session would otherwise be anonymous.
+       */
+      identifySentryUser(_user);
     }
     setIsBootstrapping(false);
   }, []);
