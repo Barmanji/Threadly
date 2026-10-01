@@ -78,7 +78,16 @@ const sendMessage: RequestHandler = asyncHandler(
       throw new ApiError(400, "Message content or attachment is required");
     }
 
-    const selectedChat = await Chat.findById(chatId);
+    // The caller has to be a participant. Without this, any logged in user
+    // could post into any conversation by id -- victims would see it arrive as
+    // an ordinary message from a real account, and the attachments would bill
+    // the owner's Cloudinary account. getAllMessages, deleteMessage and
+    // reactToMessage all already filter on `participants`; this was the odd one
+    // out. Matches the house pattern from deleteMessage.
+    const selectedChat = await Chat.findOne({
+      _id: new mongoose.Types.ObjectId(chatId),
+      participants: (req.user as any)._id,
+    });
 
     if (!selectedChat) {
       throw new ApiError(404, "Chat does not exist");
@@ -193,6 +202,74 @@ const sendMessage: RequestHandler = asyncHandler(
   },
 );
 
+/**
+ * Fetch `url`, following redirects by hand so every hop is re-checked against
+ * the same host allowlist.
+ *
+ * `redirect: "follow"` (the default) would let a redirect take the request to
+ * any host, which is the SSRF the allowlist exists to prevent. But
+ * `redirect: "manual"` is not a safe swap either: every attachment uploaded
+ * before the `secure_url` change has an `http://` URL stored in Mongo, and
+ * Cloudinary answers those with a 301 to the `https://` equivalent. Refusing
+ * redirects outright would turn every existing attachment download into a 502.
+ *
+ * So redirects are followed, but each one has to land on an allowed host. Three
+ * hops is well above what Cloudinary needs for the scheme upgrade and well below
+ * anything a redirect chain could use to loop.
+ */
+const fetchFollowingAllowedHosts = async (
+  url: string,
+  isAllowedHost: (hostname: string) => boolean,
+  // Spelled out via `typeof fetch` rather than `Response`, which in this file
+  // is Express's Response.
+): Promise<Awaited<ReturnType<typeof fetch>>> => {
+  const MAX_HOPS = 3;
+
+  let current = url;
+  for (let hop = 0; hop <= MAX_HOPS; hop++) {
+    const response = await fetch(current, {
+      headers: {
+        Accept: "*/*",
+        "User-Agent": "Mozilla/5.0 (compatible; ChatApp/1.0)",
+      },
+      redirect: "manual",
+    });
+
+    const isRedirect = [301, 302, 303, 307, 308].includes(response.status);
+    if (!isRedirect) return response;
+
+    const location = response.headers.get("location");
+    if (!location) return response;
+
+    // Last allowed hop: give up rather than fetch one more time.
+    if (hop === MAX_HOPS) {
+      throw new ApiError(
+        502,
+        "Could not fetch the file from storage. Please try downloading it again.",
+      );
+    }
+
+    let next: URL;
+    try {
+      next = new URL(location, current);
+    } catch {
+      throw new ApiError(502, "Storage returned an unusable redirect.");
+    }
+    if (next.protocol !== "https:" && next.protocol !== "http:") {
+      throw new ApiError(400, "Only Cloudinary URLs are allowed");
+    }
+    if (!isAllowedHost(next.hostname)) {
+      throw new ApiError(400, "Only Cloudinary URLs are allowed");
+    }
+    current = next.toString();
+  }
+
+  throw new ApiError(
+    502,
+    "Could not fetch the file from storage. Please try downloading it again.",
+  );
+};
+
 const downloadAttachment: RequestHandler = asyncHandler(async (req, res) => {
   const url = req.query.url as string | undefined;
   const filename = (req.query.filename as string | undefined) || "download";
@@ -208,19 +285,26 @@ const downloadAttachment: RequestHandler = asyncHandler(async (req, res) => {
   }
 
   // Only allow proxying our own object storage to avoid SSRF.
-  if (!parsed.hostname.endsWith("res.cloudinary.com")) {
+  //
+  // The check used to be `endsWith("res.cloudinary.com")`, which is a loose
+  // suffix match: `notres.cloudinary.com` and `res.cloudinary.com.attacker.net`
+  // style confusion is exactly what a suffix check is bad at. An exact match,
+  // allowing Cloudinary's own regional subdomains, is strictly tighter and
+  // cannot reject a URL this app actually stored.
+  const isAllowedHost = (candidate: string): boolean => {
+    const h = candidate.toLowerCase();
+    return h === "res.cloudinary.com" || h.endsWith(".res.cloudinary.com");
+  };
+
+  if (!isAllowedHost(parsed.hostname)) {
     throw new ApiError(400, "Only Cloudinary URLs are allowed");
   }
 
   // Fetch with browser-like headers — Cloudinary's CDN returns a short error
   // page (instead of the real file) for servers/clients that send a bare
   // user-agent, which is why blob downloads came back as tiny 2KB files.
-  const response = await fetch(url, {
-    headers: {
-      Accept: "*/*",
-      "User-Agent": "Mozilla/5.0 (compatible; ChatApp/1.0)",
-    },
-  });
+  const response = await fetchFollowingAllowedHosts(url, isAllowedHost);
+
   if (!response.ok) {
     throw new ApiError(
       502,

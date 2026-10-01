@@ -1440,8 +1440,13 @@ const ChatPage = () => {
                   placement="top"
                   onClose={() => setEmojiPickerOpen(false)}
                   onPick={(emoji) => {
+                    // Deliberately does not close. Picking an emoji inserts it
+                    // at the caret, and people usually want several in a row;
+                    // dismissing after each one meant reopening the picker
+                    // between every emoji. It now closes on an outside click,
+                    // Escape, or typing into the composer (handled inside
+                    // EmojiPicker).
                     insertEmoji(emoji);
-                    setEmojiPickerOpen(false);
                   }}
                 />
               ) : null}

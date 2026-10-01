@@ -415,14 +415,21 @@ const CallModal: React.FC<CallModalProps> = ({
             full width, which turns that sliver back into a roughly 1.4:1
             box and crops far less.
 
-            `sm:flex-row` / `sm:w-1/2` / `sm:flex-none` put the desktop
-            layout back exactly as it was — `sm:flex-none` matters because
-            the mobile `flex-1` would otherwise leave `flex-basis: 0` in
-            place and change how the two 50% tiles are measured.
+            `sm:flex-row` plus `sm:flex-1 sm:min-w-0` put the desktop layout
+            back to two equal halves. It deliberately drops the `sm:w-1/2
+            sm:flex-none` pair it replaces: two non-shrinking 50% tiles plus a
+            `gap-4` add up to 100% + 16px in a box that is only 100% wide, so
+            the row overflowed by exactly one gap and pushed the right-hand
+            tile out through the panel's padding. The yellow frame showed 16px
+            on the left and 0px on the right. Letting flex distribute the space
+            that is left *after* the gap (`flex-basis: 0`, `flex-grow: 1`) makes
+            the two tiles share the remainder exactly, so the band is the same
+            on both sides. `sm:min-w-0` stops the tiles' automatic minimum
+            content width from fighting that.
           */}
           <div className="flex min-h-0 w-full flex-1 flex-col gap-4 sm:flex-row">
-            {remoteTile("min-h-0 w-full flex-1 sm:h-full sm:w-1/2 sm:flex-none")}
-            {localTile("min-h-0 w-full flex-1 sm:h-full sm:w-1/2 sm:flex-none")}
+            {remoteTile("min-h-0 w-full flex-1 sm:h-full sm:min-w-0")}
+            {localTile("min-h-0 w-full flex-1 sm:h-full sm:min-w-0")}
           </div>
 
           {/* Controls */}

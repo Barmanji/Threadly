@@ -20,7 +20,14 @@ const uploadResultCloudinary = async (localFilePath: string, resourceType: 'auto
         )
         //this current image is not the right way!
         //currentImage = cloudinary.api.resources_by_asset_ids(localFilePath) //to give me link of file
-        //console.log('file is uploaded on cloudiiiiiiiiiiiiiiiinarrrrrrrrrryyyyyyyy', responseCloudnary.url, uploadResultCloudinary);
+        //console.log('file is uploaded on cloudiiiiiiiiiiiiiiiinarrrrrrrrrryyyyyyyy', responseCloudnary.secure_url, uploadResultCloudinary);
+        //
+        // `secure_url`, not `url`. The app is served over https, and a browser
+        // blocks an http subresource on an https page as mixed content, so every
+        // avatar and inline attachment stored from an `url` value was silently
+        // not rendering. Only new uploads change here; rows already in Mongo
+        // keep their http URL and keep working, because the download proxy
+        // follows Cloudinary's http -> https redirect.
         fs.unlinkSync(localFilePath)
         return responseCloudnary;
     }

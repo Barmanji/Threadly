@@ -4,11 +4,24 @@ import { DB_NAME } from "../constants";
 import logger from "../logger/winston.logger.js";
 dotenv.config({ path: "./.env" });
 
+/**
+ * Reduce a mongodb connection string to just the parts that are useful in a log
+ * line. A connection string carries the username and password in the clear
+ * (`mongodb://user:pass@host/db`), so logging it verbatim puts production
+ * database credentials into stdout, where they end up in whatever collects the
+ * pm2 logs and in the deploy output of anyone who can read them.
+ */
+const redactMongoUri = (uri: string | undefined): string => {
+    if (!uri) return "<not set>";
+    return uri.replace(/\/\/([^:@/]+):([^@/]+)@/, "//$1:***@");
+};
+
 const connectDB = async () => {
     try {
-        console.log(`${process.env.MONGODB_LOCAL_URI}/${DB_NAME}`)
+        const uri = `${process.env.MONGODB_LOCAL_URI}/${DB_NAME}`;
+        console.log(redactMongoUri(uri))
         const mongooseInstance = await mongoose.connect(
-            `${process.env.MONGODB_LOCAL_URI}/${DB_NAME}`,
+            uri,
         );
         console.log(
             `\n MONGO DB IS CONNECTED || DB HOST: ${mongooseInstance.connection.host}, PORT: ${process.env.PORT}`,

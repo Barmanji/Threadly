@@ -77,17 +77,6 @@ app.use(express.urlencoded({ extended: true, limit: "16kb" }));
 app.use(express.static("public")); // configure static file to save images locally
 app.use(cookieParser());
 
-// required for passport
-app.use(
-  session({
-    secret: process.env.EXPRESS_SESSION_SECRET!,
-    resave: true,
-    saveUninitialized: true,
-  }),
-); // session secret
-app.use(passport.initialize());
-app.use(passport.session()); // persistent login sessions
-
 app.use(morganMiddleware);
 initializeSocketIO(io);
 setupMediasoup(io);

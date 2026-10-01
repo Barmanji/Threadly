@@ -5,6 +5,7 @@ import { IUser, User } from "../models/user/user.model.js";
 import { Chat } from "../models/chat/chat.model.js";
 import { ChatMessage } from "../models/chat/message.model.js";
 import { emitSocketEvent } from "../socket/socket.js";
+import { invalidateChatAccess } from "../socket/chatAccess.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
@@ -222,6 +223,10 @@ const createOrGetAOneOnOneChat: RequestHandler = asyncHandler(
       ], // add receiver and logged in user as participants
       admin: (req.user as IUserWithId)._id,
     });
+    // Nothing can have cached this chat yet, but invalidating keeps every
+    // membership change going through the same call, so a future reader cannot
+    // assume "new chat" needs no invalidation.
+    invalidateChatAccess(newChatInstance._id.toString());
 
     // structure the chat as per the common aggregation to keep the consistency
     const createdChat = await Chat.aggregate([
@@ -297,6 +302,7 @@ const createAGroupChat: RequestHandler = asyncHandler(
       participants: members,
       admin: (req.user as IUserWithId)._id,
     });
+    invalidateChatAccess(groupChat._id.toString());
 
     // structure the chat
     const chat = await Chat.aggregate([
@@ -337,12 +343,21 @@ const createAGroupChat: RequestHandler = asyncHandler(
 
 const getGroupChatDetails: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
+    const user = req.user as IUserWithId;
+    if (!user?._id) {
+      throw new ApiError(401, "User not authenticated");
+    }
+
     const { chatId } = req.params;
+    // `participants: user._id` is the fix. chatCommonAggregation() expands every
+    // participant with their email, so without this any logged in user could
+    // enumerate group membership and harvest member email addresses by id.
     const groupChat = await Chat.aggregate([
       {
         $match: {
           _id: new mongoose.Types.ObjectId(chatId as string),
           isGroupChat: true,
+          participants: user._id,
         },
       },
       ...chatCommonAggregation(),
@@ -464,6 +479,9 @@ const deleteGroupChat: RequestHandler = asyncHandler(
     }
 
     await Chat.findByIdAndDelete(chatId);
+    // The chat no longer exists, so drop the cached member list rather than
+    // letting a socket keep treating it as a room it may join for up to the TTL.
+    invalidateChatAccess(chatId);
 
     await deleteCascadeChatMessages(chatId); // remove all messages and attachments associated with the chat
 
@@ -496,11 +514,23 @@ const deleteOneOnOneChat: RequestHandler = asyncHandler(
 
     const { chatId } = req.params;
 
-    // check for chat existence
+    // Check for chat existence AND that the caller is actually in it.
+    //
+    // This used to match on `_id` alone, which meant any logged in user who
+    // learned a chatId could destroy that conversation and every message in it.
+    // There being no admin on a 1:1 chat is a reason not to check `admin`; it
+    // is not a reason to skip the membership check.
+    //
+    // `$ne: true` rather than `isGroupChat: false` on purpose: the schema
+    // defaults the field to false, but `$ne` also matches a document where the
+    // field is absent entirely, so a legacy or hand-created chat can't be
+    // deleted through the 1:1 route.
     const chat = await Chat.aggregate([
       {
         $match: {
           _id: new mongoose.Types.ObjectId(chatId as string),
+          isGroupChat: { $ne: true },
+          participants: (req.user as IUserWithId)._id,
         },
       },
       ...chatCommonAggregation(),
@@ -508,11 +538,15 @@ const deleteOneOnOneChat: RequestHandler = asyncHandler(
 
     const payload = chat[0] as ChatPayload;
 
+    // 404 rather than 403 on purpose: telling a non-member that the chat
+    // exists is itself a small leak, and it matches what deleteMessage and
+    // getAllMessages already do.
     if (!payload) {
       throw new ApiError(404, "Chat does not exist");
     }
 
     await Chat.findByIdAndDelete(chatId); // delete the chat even if user is not admin because it's a personal chat
+    invalidateChatAccess(chatId as string);
 
     await deleteCascadeChatMessages(chatId as string); // delete all the messages and attachments associated with the chat
 
@@ -575,6 +609,10 @@ const leaveGroupChat: RequestHandler = asyncHandler(
       },
       { new: true },
     );
+    // Invalidate rather than wait out the cache TTL: a user who just left must
+    // stop being able to relay into the room immediately, otherwise they keep
+    // whiteboard and typing access for up to 30 seconds after leaving.
+    invalidateChatAccess(chatId as string);
 
     const chat = await Chat.aggregate([
       {
@@ -645,6 +683,9 @@ const addNewParticipantInGroupChat: RequestHandler = asyncHandler(
       },
       { new: true },
     );
+    // A newly added member must be able to join the room right away rather than
+    // being refused until the cache expires.
+    invalidateChatAccess(chatId as string);
 
     const chat = await Chat.aggregate([
       {
@@ -718,6 +759,9 @@ const removeParticipantFromGroupChat: RequestHandler = asyncHandler(
       },
       { new: true },
     );
+    // Removal must take effect at once; a removed member keeps relaying to the
+    // room until the TTL expires otherwise.
+    invalidateChatAccess(chatId as string);
 
     const chat = await Chat.aggregate([
       {

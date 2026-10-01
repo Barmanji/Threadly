@@ -26,6 +26,32 @@ const PICKER_MAX_HEIGHT = 380;
 const VIEWPORT_MARGIN = 8;
 
 /**
+ * Short labels for the category tabs.
+ *
+ * The section `label`s are the full CLDR names ("Smileys & Emotion"), which are
+ * right for the heading above each list but hopeless as tab text: at 10px in a
+ * 320px panel, nine of them overflowed a horizontally scrolling row, so most
+ * tabs sat off-screen and the visible ones were ~18px tall — too small to hit.
+ *
+ * These are display-only. The tab keeps the full `label` as its accessible name
+ * via `aria-label`, and the heading inside the list still shows the full name, so
+ * nothing is lost. Keyed by section id with a fallback to the full label, so a
+ * section added to the generated data file still renders a usable tab instead of
+ * `undefined`.
+ */
+const TAB_LABELS: Record<string, string> = {
+  smileys: "Smileys",
+  people: "People",
+  animals: "Animals",
+  food: "Food",
+  travel: "Places",
+  activities: "Fun",
+  objects: "Objects",
+  symbols: "Symbols",
+  flags: "Flags",
+};
+
+/**
  * The full emoji picker: search plus the CLDR sections.
  *
  * Rendered through a portal with `position: fixed` rather than in place. The
@@ -93,7 +119,7 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
     };
   }, [anchor, placement]);
 
-  // Close on an outside pointer-down or Escape.
+  // Close on an outside pointer-down, on typing into another field, or Escape.
   useLayoutEffect(() => {
     const onPointerDown = (e: PointerEvent) => {
       if (panelRef.current?.contains(e.target as Node)) return;
@@ -101,7 +127,23 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
       onClose();
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Typing in the chat composer (or any other field outside the picker)
+      // dismisses it. Without this the picker stayed open over the composer
+      // while the user was writing a message, which is the opposite of what
+      // picking an emoji is for. The picker's own search box is inside the
+      // panel, so it is excluded and keeps working.
+      if (panelRef.current?.contains(e.target as Node)) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      const isEditable =
+        tag === "TEXTAREA" ||
+        tag === "INPUT" ||
+        el?.isContentEditable === true;
+      if (isEditable) onClose();
     };
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -187,20 +229,38 @@ const EmojiPicker: React.FC<EmojiPickerProps> = ({
 
       {/* Section tabs. Hidden while searching, since the results are one list. */}
       {trimmed ? null : (
-        <div className="flex gap-1 overflow-x-auto border-b-[3px] border-ink p-2">
+        <div className="flex flex-none gap-1.5 overflow-x-auto overscroll-x-contain border-b-[3px] border-ink p-2 pb-3.5 [scrollbar-width:thin]">
           {EMOJI_SECTIONS.map((section) => (
             <button
               key={section.id}
               type="button"
               onClick={() => scrollToSection(section.id)}
+              aria-label={section.label}
+              aria-current={activeSection === section.id}
               className={classNames(
-                "neo-sm flex-shrink-0 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide transition-colors",
+                // One row that slides sideways. Wrapping onto two or three rows
+                // cost ~90px of the picker's 380px budget, which is a lot of
+                // emoji grid not shown.
+                //
+                // `flex-none` on each tab is load-bearing: in an
+                // `overflow-x-auto` flex row, items shrink by default instead of
+                // overflowing, so without it the nine tabs squash to fit and
+                // never scroll at all.
+                //
+                // `min-h-11` makes the bar 44px, a full-size touch target,
+                // because `px-2 py-1 text-[10px]` rendered an ~18px sliver that
+                // was hard to see and harder to tap. Raising this to 200px did
+                // not help and that was the real tell: the row itself was being
+                // squashed, so `min-h` on the buttons had nothing to grow into.
+                // The parent above now carries `flex-none` plus the bottom
+                // padding the 3px `neo-sm` shadow needs.
+                "neo-sm flex min-h-9 flex-none items-center justify-center px-3.5 py-2 text-xs font-extrabold uppercase tracking-wide transition-colors",
                 activeSection === section.id
                   ? "bg-retro-yellow text-ink"
                   : "bg-cream text-ink/60 hover:text-ink",
               )}
             >
-              {section.label}
+              {TAB_LABELS[section.id] ?? section.label}
             </button>
           ))}
         </div>

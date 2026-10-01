@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import bcrypt from "bcryptjs";
 import logger from "../logger/winston.logger";
 import { asyncHandler } from "../utils/asyncHandler";
 import { ApiError } from "../utils/ApiError";
@@ -589,15 +590,30 @@ const loginUser: RequestHandler = asyncHandler(
         },
       ],
     });
+    // One response for "no such account" and "wrong password", both in wording
+    // and in status code. These used to be a 404 and a 401 with different
+    // messages, which is a free account-enumeration oracle: sign up, try a
+    // username, and the status alone tells you whether it exists. The
+    // verification and recovery code-check paths already answer identically for
+    // the same reason; login was the outlier.
+    //
+    // The dummy bcrypt compare is what stops timing from giving the answer
+    // back. Without it an unknown identifier returns after one indexed query
+    // while a known one takes the ~100ms hash, and the difference is trivially
+    // measurable over a network — which would make the identical error message
+    // pointless. It compares against a fixed hash of a value nobody knows.
+    const GENERIC_LOGIN_FAILURE =
+      "That email or username and password combination is not correct.";
     if (!findUser) {
-      throw new ApiError(
-        404,
-        "No account exists with that email or username. Check for typos, or create an account if you don't have one yet.",
+      await bcrypt.compare(
+        password,
+        "$2b$10$LmZ5VHY71.LZZ502VB/wqOH1cbcZtBkNI.J/KYfPptZsu55bTnBBC",
       );
+      throw new ApiError(401, GENERIC_LOGIN_FAILURE);
     }
     const passwordValidity = await findUser.isPasswordCorrect(password);
     if (!passwordValidity) {
-      throw new ApiError(401, "Invalid user credentials");
+      throw new ApiError(401, GENERIC_LOGIN_FAILURE);
     }
 
     // Guard rail: an account created since the Resend rollout must have
@@ -729,6 +745,12 @@ const changeCurrentPassword: RequestHandler = asyncHandler(
     }
 
     user!.password = newPassword;
+    // Changing the password invalidates all existing sessions, so clear the
+    // stored refresh token. Otherwise an old session's refresh token stays
+    // valid and can keep minting new access tokens against a password that was
+    // just rotated. Empty string, not $unset, to match how the recovery flow
+    // clears it and to stay within the field's declared `string` type.
+    user!.refreshToken = "";
     await user!.save({ validateBeforeSave: false });
 
     return res
@@ -848,7 +870,15 @@ const getAnyUserFriendList: RequestHandler = asyncHandler(
       throw new ApiError(400, "Username is required");
     }
     if (typeof username === "string") {
-      const user = await User.findOne({ username: username.toLowerCase() });
+      // Also public, so it also gets a projection rather than a bare findOne.
+      // The response only carries `friends`, so nothing sensitive was leaking
+      // here today, but `friends` is a list of user ids and that is a social
+      // graph anyone on the internet can enumerate by username. The explicit
+      // select also means a future change that returns the user document cannot
+      // accidentally start serving the password hash or email that a bare
+      // findOne would hand back.
+      const user = await User.findOne({ username: username.toLowerCase() })
+        .select("-__v -password -refreshToken -email -emailVerification");
       if (!user) {
         throw new ApiError(404, "User not found");
       }
@@ -870,7 +900,22 @@ const getUserProfile: RequestHandler = asyncHandler(
     }
     const user = await User.findOne({
       username: username.toLowerCase(),
-    }).select("-__v -password -refreshToken");
+      // This route sits above `router.use(verifyJWT)`, so it is reachable with
+      // no token at all and a username is enough to reach it. Projecting out
+      // `-__v -password -refreshToken` still shipped `email`, and also the
+      // transient `emailVerification` sub-document (a bcrypt hash of the
+      // account's current verification code) whenever one was outstanding.
+      // Both are excluded now, leaving only what a public profile needs.
+      //
+      // The projection is the fix rather than moving the route behind
+      // `verifyJWT`: nothing in the frontend calls this endpoint at all, but a
+      // profile that never needs an address should not be able to serve one
+      // regardless of who is asking. Neither the response shape the UI depends
+      // on nor any existing client is affected by hiding these fields.
+    })
+      .select(
+        "-__v -password -refreshToken -email -emailVerification -status",
+      );
 
     if (!user) {
       throw new ApiError(404, "User not found");
