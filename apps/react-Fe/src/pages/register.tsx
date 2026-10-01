@@ -72,8 +72,6 @@ const Register = () => {
   const [step, setStep] = useState<"form" | "verify">("form");
   const [code, setCode] = useState("");
   const [codeError, setCodeError] = useState("");
-  const [attemptsLeft, setAttemptsLeft] = useState<number | null>(null);
-  const [maxAttempts, setMaxAttempts] = useState(5);
   const [maskedEmail, setMaskedEmail] = useState("");
   const [resendIn, setResendIn] = useState(0);
 
@@ -276,29 +274,15 @@ const Register = () => {
   const enterVerifyStep = (
     masked: string,
     cooldownSeconds: number,
-    attempts: number | null,
     recovering = false,
   ) => {
     setMaskedEmail(masked);
-    if (attempts !== null) setMaxAttempts(attempts);
     setCode("");
     setCodeError("");
-    setAttemptsLeft(null);
     setResendIn(cooldownSeconds);
     setPendingVerification(null);
     setRecoveryMode(recovering);
     setStep("verify");
-  };
-
-  /**
-   * Drive the "N attempts left" counter from the server's own message rather
-   * than guessing on the client, so the number the user reads is the number the
-   * server will enforce.
-   */
-  const applyAttemptsFromMessage = (message: string) => {
-    const match = message.match(/(\d+)\s+attempt/i);
-    if (match) setAttemptsLeft(Number(match[1]));
-    else if (/all \d+ attempts|no attempts/i.test(message)) setAttemptsLeft(0);
   };
 
   // --- Submit ------------------------------------------------------------
@@ -345,10 +329,8 @@ const Register = () => {
     }
 
     setMaskedEmail(outcome.data.email);
-    setMaxAttempts(outcome.data.maxAttempts ?? 5);
     setCode("");
     setCodeError("");
-    setAttemptsLeft(null);
     setResendIn(RESEND_COOLDOWN_SECONDS);
     setPendingVerification(null);
     setStep("verify");
@@ -392,7 +374,7 @@ const Register = () => {
         const parsed = result.message.match(/(\d+)\s+second/)?.[1];
         const seconds = parsed ? Number(parsed) : RESEND_COOLDOWN_SECONDS;
 
-        enterVerifyStep(maskEmail(target), seconds, null, true);
+        enterVerifyStep(maskEmail(target), seconds, true);
         toast.message("We already sent a code to that address", {
           description: "Use the most recent one — we didn't send another.",
         });
@@ -412,7 +394,6 @@ const Register = () => {
     enterVerifyStep(
       maskEmail(target),
       result.cooldownSeconds ?? RESEND_COOLDOWN_SECONDS,
-      result.maxAttempts,
       true,
     );
 
@@ -440,7 +421,6 @@ const Register = () => {
       // Failed. `requestHandler` already produced a precise message, which
       // includes the remaining-attempt count.
       setCodeError(result.message);
-      applyAttemptsFromMessage(result.message);
       return;
     }
 
@@ -468,8 +448,6 @@ const Register = () => {
     });
 
     if ("message" in result) {
-      applyAttemptsFromMessage(result.message);
-
       // A complaint about the DETAILS rather than the code. The server
       // deliberately leaves the code valid in that case, so send the user
       // back to the form, error on the offending input, and let them resubmit
@@ -533,7 +511,6 @@ const Register = () => {
     setResendIn(result.cooldownSeconds ?? RESEND_COOLDOWN_SECONDS);
     setCode("");
     setCodeError("");
-    setAttemptsLeft(null);
     toast.success(`New code sent to ${maskedEmail || email}`);
   };
 
