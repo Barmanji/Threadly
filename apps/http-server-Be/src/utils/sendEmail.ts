@@ -8,7 +8,7 @@ import logger from "../logger/winston.logger.js";
  * on a domain verified in the Resend dashboard or every send is rejected.
  */
 
-const RESEND_FROM = process.env.RESEND_FROM_EMAIL || "Threadly <noreply@barmanji.com>";
+const RESEND_FROM = process.env.RESEND_FROM_EMAIL || "Threadly <verify@barmanji.com>";
 
 let client: Resend | null = null;
 
