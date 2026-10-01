@@ -4,13 +4,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node ./scripts/bake-release.mjs",
     "start": "node --import ./dist/instrument.js dist/index.js",
     "dev": "nodemon -r dotenv/config --watch src --ext ts,tsx --exec \"pnpm run build && node --import ./dist/instrument.js dist/index.js\"",
     "check-types": "tsc --noEmit",
     "swagger": "node ./swagger.js",
     "sentry-release": "sentry-cli releases new ${SENTRY_RELEASE:-$(git rev-parse --short HEAD)}",
-    "sentry-sourcemaps": "sentry-cli sourcemaps upload --release ${SENTRY_RELEASE:-$(git rev-parse --short HEAD)} ./dist"
+    "sentry-sourcemaps": "sentry-cli sourcemaps upload --release ${SENTRY_RELEASE:-$(git rev-parse --short HEAD)} ./dist/**/*.js",
+    "sentry-verify": "node ./scripts/sentry-verify.mjs"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
@@ -60,6 +61,7 @@
     "socket.io": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
     "winston": "^3.19.0",
+    "winston-transport": "^4.9.0",
     "yaml": "^2.8.2"
   }
 }

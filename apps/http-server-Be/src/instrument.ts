@@ -1,5 +1,7 @@
 import * as Sentry from "@sentry/node";
 import dotenv from "dotenv";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /*
  * Loaded FIRST, before anything else in the server, via
@@ -19,7 +21,35 @@ dotenv.config({ path: "./.env" });
 
 const dsn = process.env.SENTRY_DSN;
 const environment = process.env.NODE_ENV || "development";
-const release = process.env.SENTRY_RELEASE;
+
+/*
+ * Release resolution order:
+ *
+ *   1. `SENTRY_RELEASE` at runtime — what CI should set, so one value pins the
+ *      frontend and backend to the same release.
+ *   2. `dist/release.json`, written at build time by `scripts/bake-release.mjs`
+ *      from the same git commit the artifacts were uploaded under.
+ *   3. Nothing.
+ *
+ * The fallback matters because the failure is silent. A backend that reaches
+ * step 3 still reports every error; it just reports them with no release, so
+ * Sentry cannot match the uploaded source maps and stack traces resolve to
+ * `dist/index.js` offsets instead of TypeScript. Baking the value makes "I
+ * forgot to set an env var in production" a build-time concern instead of a
+ * permanent, invisible one.
+ */
+const readBakedRelease = (): string | undefined => {
+  try {
+    // `__dirname` is `dist/` in the built output and `src/` under ts-node. Only
+    // the built location has the sibling file, so a failed read is normal.
+    const baked = readFileSync(join(__dirname, "release.json"), "utf8");
+    return (JSON.parse(baked) as { release?: string | null }).release ?? undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const release = process.env.SENTRY_RELEASE || readBakedRelease();
 
 Sentry.init({
   // Spread conditionally for the same reason as the browser SDK: passing
@@ -81,21 +111,20 @@ Sentry.init({
   ],
 
   /*
-   * The one integration that matters most here, because this codebase's winston
-   * level is `warn` in production: every `logger.info` is DROPPED when not in
-   * development, and morgan is skipped entirely. So `logger.error` is the only
-   * record a production failure leaves today, and it is a formatted string with
-   * the stack discarded.
+   * Winston logs reach Sentry through an explicit transport added in
+   * `logger/winston.logger.ts`, NOT automatically. An earlier version of this
+   * file claimed Sentry picked them up on its own; that was wrong, and it is
+   * worth recording because the failure is invisible — nothing errors, the logs
+   * just never arrive.
    *
-   * Winston implements the `error`-level hook Sentry exposes, so error logs
-   * become real events with their metadata attached — no `winston-sentry`
-   * transport needed, and the existing `logger.error` call sites keep working
-   * unchanged.
+   * This hook exists only to de-duplicate. `errorHandler` logs the failure AND
+   * `expressIntegration` captures it as an event, so forwarding error-level logs
+   * too would put every 500 in the issue stream twice. `warn` still goes
+   * through, which is the level that carries real signal without an exception
+   * attached to it.
    */
   beforeSendLog(log) {
     if (log.level === "error") {
-      // De-duplicate: the Express error handler logs AND Sentry captures the
-      // same failure, which would double every 500 in the issue stream.
       return null;
     }
     return log;
