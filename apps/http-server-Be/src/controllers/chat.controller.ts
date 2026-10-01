@@ -337,12 +337,21 @@ const createAGroupChat: RequestHandler = asyncHandler(
 
 const getGroupChatDetails: RequestHandler = asyncHandler(
   async (req: Request, res: Response) => {
+    const user = req.user as IUserWithId;
+    if (!user?._id) {
+      throw new ApiError(401, "User not authenticated");
+    }
+
     const { chatId } = req.params;
+    // `participants: user._id` is the fix. chatCommonAggregation() expands every
+    // participant with their email, so without this any logged in user could
+    // enumerate group membership and harvest member email addresses by id.
     const groupChat = await Chat.aggregate([
       {
         $match: {
           _id: new mongoose.Types.ObjectId(chatId as string),
           isGroupChat: true,
+          participants: user._id,
         },
       },
       ...chatCommonAggregation(),
@@ -496,11 +505,23 @@ const deleteOneOnOneChat: RequestHandler = asyncHandler(
 
     const { chatId } = req.params;
 
-    // check for chat existence
+    // Check for chat existence AND that the caller is actually in it.
+    //
+    // This used to match on `_id` alone, which meant any logged in user who
+    // learned a chatId could destroy that conversation and every message in it.
+    // There being no admin on a 1:1 chat is a reason not to check `admin`; it
+    // is not a reason to skip the membership check.
+    //
+    // `$ne: true` rather than `isGroupChat: false` on purpose: the schema
+    // defaults the field to false, but `$ne` also matches a document where the
+    // field is absent entirely, so a legacy or hand-created chat can't be
+    // deleted through the 1:1 route.
     const chat = await Chat.aggregate([
       {
         $match: {
           _id: new mongoose.Types.ObjectId(chatId as string),
+          isGroupChat: { $ne: true },
+          participants: (req.user as IUserWithId)._id,
         },
       },
       ...chatCommonAggregation(),
@@ -508,6 +529,9 @@ const deleteOneOnOneChat: RequestHandler = asyncHandler(
 
     const payload = chat[0] as ChatPayload;
 
+    // 404 rather than 403 on purpose: telling a non-member that the chat
+    // exists is itself a small leak, and it matches what deleteMessage and
+    // getAllMessages already do.
     if (!payload) {
       throw new ApiError(404, "Chat does not exist");
     }

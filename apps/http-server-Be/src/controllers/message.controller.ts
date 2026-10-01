@@ -78,7 +78,16 @@ const sendMessage: RequestHandler = asyncHandler(
       throw new ApiError(400, "Message content or attachment is required");
     }
 
-    const selectedChat = await Chat.findById(chatId);
+    // The caller has to be a participant. Without this, any logged in user
+    // could post into any conversation by id -- victims would see it arrive as
+    // an ordinary message from a real account, and the attachments would bill
+    // the owner's Cloudinary account. getAllMessages, deleteMessage and
+    // reactToMessage all already filter on `participants`; this was the odd one
+    // out. Matches the house pattern from deleteMessage.
+    const selectedChat = await Chat.findOne({
+      _id: new mongoose.Types.ObjectId(chatId),
+      participants: (req.user as any)._id,
+    });
 
     if (!selectedChat) {
       throw new ApiError(404, "Chat does not exist");
